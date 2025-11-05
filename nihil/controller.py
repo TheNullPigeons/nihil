@@ -9,15 +9,14 @@ class NihilController:
         self.parser = self._create_parser()
     
     def _create_parser(self) -> argparse.ArgumentParser:
-        """Crée le parser d'arguments pour la CLI"""
         parser = argparse.ArgumentParser(
             prog="nihil",
             description="Nihil - by 0xbbuddha and Goultarde",
             formatter_class=argparse.RawDescriptionHelpFormatter,
             epilog="""
-Exemples:
-  nihil --version          Affiche la version
-  nihil --help             Affiche cette aide
+Examples:
+  nihil --version          Display version
+  nihil --help             Display this help
             """
         )
         
@@ -27,22 +26,20 @@ Exemples:
             version=f"%(prog)s {self._get_version()}"
         )
         
-        # Sous-commandes
         subparsers = parser.add_subparsers(
             dest="command",
-            help="Commandes disponibles",
+            help="Available commands",
             metavar="COMMAND"
         )
         
-        # Commande info
         info_parser = subparsers.add_parser(
             "info",
-            help="Affiche des informations sur Nihil"
+            help="Display information about Nihil"
         )
         
         version_parser = subparsers.add_parser(
             "version",
-            help="Affiche la version de Nihil"
+            help="Display Nihil version"
         )
         
         return parser
@@ -69,7 +66,7 @@ Exemples:
     def _handle_info(self) -> None:
         print("Nihil - by 0xbbuddha and Goultarde")
         print(f"Version: {self._get_version()}")
-        print("\nCe projet est en cours de développement.")
+        print("\nThis project is under development.")
 
 
 def main() -> int:
@@ -77,9 +74,9 @@ def main() -> int:
         controller = NihilController()
         return controller.run()
     except KeyboardInterrupt:
-        print("\n\nInterruption par l'utilisateur.")
+        print("\n\nUser interruption.")
         return 130
     except Exception as e:
-        print(f"Erreur: {e}", file=sys.stderr)
+        print(f"Error: {e}", file=sys.stderr)
         return 1
 
