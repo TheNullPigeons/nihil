@@ -1,0 +1,3 @@
+[submodule "nihil-images"]
+	path = nihil-images
+	url = git@github.com:NihilOps/nihil-images.git
