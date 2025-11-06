@@ -1,3 +1,6 @@
 [submodule "nihil-images"]
 	path = nihil-images
 	url = git@github.com:NihilOps/nihil-images.git
+[submodule "nihil-vault"]
+	path = nihil-vault
+	url = git@github.com:NihilOps/nihil-vault.git
