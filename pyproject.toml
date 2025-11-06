@@ -4,7 +4,9 @@ version = "0.1.0"
 description = "Nihil - by 0xbbuddha and Goultarde"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "docker>=7.0.0",
+]
 
 [project.scripts]
 nihil = "nihil.controller:main"
