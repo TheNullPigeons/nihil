@@ -9,4 +9,4 @@ dependencies = [
 ]
 
 [project.scripts]
-nihil = "nihil.controller:main"
+nihil = "nihil.nihilController:main"
