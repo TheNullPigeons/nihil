@@ -5,6 +5,7 @@
 import docker
 from typing import Optional, Dict, List
 import sys
+from nihil.nihilFormatter import NihilFormatter
 
 
 class NihilManager:
@@ -16,8 +17,10 @@ class NihilManager:
         try:
             self.client = docker.from_env()
             self.client.ping()
+            self.formatter = NihilFormatter()
         except docker.errors.DockerException as e:
-            print(f"Error: Unable to connect to Docker: {e}", file=sys.stderr)
+            formatter = NihilFormatter()
+            print(formatter.error(f"Unable to connect to Docker: {e}"), file=sys.stderr)
             sys.exit(1)
     
     def ensure_image_exists(self, image: str = None) -> bool:
@@ -29,14 +32,14 @@ class NihilManager:
             self.client.images.get(image)
             return True
         except docker.errors.ImageNotFound:
-            print(f"[*] Image '{image}' not found locally.")
-            print(f"[*] Pulling '{image}' from registry...")
+            print(self.formatter.info(f"Image '{image}' not found locally."))
+            print(self.formatter.info(f"Pulling '{image}' from registry..."))
             try:
                 self.client.images.pull(image)
-                print(f"[✓] Image '{image}' pulled successfully.")
+                print(self.formatter.success(f"Image '{image}' pulled successfully."))
                 return True
             except docker.errors.APIError as e:
-                print(f"Error: Failed to pull image '{image}': {e}", file=sys.stderr)
+                print(self.formatter.error(f"Failed to pull image '{image}': {e}"), file=sys.stderr)
                 return False
     
     def container_exists(self, name: str) -> bool:
