@@ -94,16 +94,16 @@ class NihilController:
         
         container = self.manager.get_container(container_name)
         if not container:
-            print(f"Error: Container '{container_name}' doesn't exist.", file=sys.stderr)
+            print(self.formatter.error(f"Container '{container_name}' doesn't exist."), file=sys.stderr)
             return 1
         
         if container.status != "running":
-            print(f"[!] Container '{container_name}' is not running.")
+            print(self.formatter.warning(f"Container '{container_name}' is not running."))
             return 0
         
-        print(f"[*] Stopping container '{container_name}'...")
+        print(self.formatter.info(f"Stopping container '{container_name}'..."))
         if self.manager.stop_container(container):
-            print(f"[✓] Container '{container_name}' stopped successfully.")
+            print(self.formatter.success(f"Container '{container_name}' stopped successfully."))
             return 0
         return 1
     
@@ -115,18 +115,18 @@ class NihilController:
         for container_name in container_names:
             container = self.manager.get_container(container_name)
             if not container:
-                print(f"Error: Container '{container_name}' doesn't exist.", file=sys.stderr)
+                print(self.formatter.error(f"Container '{container_name}' doesn't exist."), file=sys.stderr)
                 errors += 1
                 continue
             
             # Stop container if running
             if container.status == "running":
-                print(f"[*] Stopping container '{container_name}'...")
+                print(self.formatter.info(f"Stopping container '{container_name}'..."))
                 self.manager.stop_container(container)
             
-            print(f"[*] Removing container '{container_name}'...")
+            print(self.formatter.info(f"Removing container '{container_name}'..."))
             if self.manager.remove_container(container, force=args.force):
-                print(f"[✓] Container '{container_name}' removed successfully.")
+                print(self.formatter.success(f"Container '{container_name}' removed successfully."))
             else:
                 errors += 1
         
@@ -138,11 +138,11 @@ class NihilController:
         
         container = self.manager.get_container(container_name)
         if not container:
-            print(f"Error: Container '{container_name}' doesn't exist.", file=sys.stderr)
+            print(self.formatter.error(f"Container '{container_name}' doesn't exist."), file=sys.stderr)
             return 1
         
         if container.status != "running":
-            print(f"Error: Container '{container_name}' is not running.", file=sys.stderr)
+            print(self.formatter.error(f"Container '{container_name}' is not running."), file=sys.stderr)
             return 1
         
         command = " ".join(args.command) if args.command else "bash"
