@@ -45,4 +45,25 @@ class NihilFormatter:
     def warning(self, message: str) -> str:
         """Format warning message"""
         return self._colorize(f"[!] {message}", self.YELLOW)
+    
+    def section_header(self, title: str, icon: str = "") -> str:
+        """Format section header"""
+        header = f"{icon} {title}" if icon else title
+        return f"\n{self._colorize(header, self.BOLD)}\n{self._colorize('─' * 60, self.CYAN)}"
+    
+    def table_row(self, items: list, widths: list = None) -> str:
+        """Format a table row
+        
+        Args:
+            items: List of items to display
+            widths: List of column widths (auto-calculated if None)
+        """
+        if widths is None:
+            widths = [30, 10, 15, 15]  # Default widths
+        
+        row = "  • "
+        for i, item in enumerate(items):
+            width = widths[i] if i < len(widths) else 20
+            row += f"{str(item):<{width}} "
+        return row
 
