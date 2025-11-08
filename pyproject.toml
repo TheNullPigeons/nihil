@@ -9,7 +9,7 @@ dependencies = [
 ]
 
 authors = [{ name = "0xbbuddha" }, { name = "Goultarde" }]
-license = { text = "MIT" }
+license = "MIT"
 
 [project.scripts]
 nihil = "nihil.nihilController:main"
