@@ -151,25 +151,21 @@ class NihilController:
     
     def _cmd_info(self) -> int:
         """Display information about images and containers"""
-        print(f"[*] Nihil version {__version__}\n")
+        print(self.formatter.info(f"Nihil version {__version__}\n"))
         
         # Images
-        print("🖼️  Available images")
-        print("─" * 60)
+        print(self.formatter.section_header("Available images", "🖼️"))
         images = self.manager.list_images()
         if images:
             for img in images:
                 tags = ", ".join(img.tags) if img.tags else "<none>"
                 size = f"{img.attrs['Size'] / (1024**3):.2f} GB"
-                print(f"  • {tags:30} {size:>10}")
+                print(self.formatter.table_row([tags, size], [30, 10]))
         else:
             print("  No nihil images found.")
         
-        print()
-        
         # Containers
-        print("🐳 Containers")
-        print("─" * 60)
+        print(self.formatter.section_header("Containers", "🐳"))
         containers = self.manager.list_containers()
         if containers:
             for c in containers:
@@ -177,7 +173,7 @@ class NihilController:
                 status = c.status
                 image = c.image.tags[0] if c.image.tags else "<none>"
                 config = "Privileged: On 🔥" if c.attrs['HostConfig']['Privileged'] else "Standard"
-                print(f"  • {name:20} [{status:10}] {image:15} {config}")
+                print(self.formatter.table_row([name, f"[{status}]", image, config], [20, 12, 15, 20]))
         else:
             print("  No nihil containers found.")
         
@@ -190,7 +186,8 @@ def main() -> int:
         controller = NihilController()
         return controller.run()
     except KeyboardInterrupt:
-        print("\n\n[!] User interruption.")
+        formatter = NihilFormatter()
+        print(f"\n\n{formatter.warning('User interruption.')}")
         return 130
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
