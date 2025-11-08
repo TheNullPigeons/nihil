@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Docker Manager for Nihil"""
+"""Docker Manager for Nihil - Handles Docker images and containers"""
 
 import docker
 from typing import Optional, Dict, List
 import sys
 
 
-class DockerManager:
-    """Manages Docker interactions"""
+class NihilManager:
+    """Manages Docker interactions for Nihil"""
+    
+    DEFAULT_IMAGE = "ghcr.io/thenullpigeons/nihil-images:latest"
     
     def __init__(self):
         try:
@@ -17,6 +19,25 @@ class DockerManager:
         except docker.errors.DockerException as e:
             print(f"Error: Unable to connect to Docker: {e}", file=sys.stderr)
             sys.exit(1)
+    
+    def ensure_image_exists(self, image: str = None) -> bool:
+        """Ensure the image exists, pull from ghcr.io if not found"""
+        if image is None:
+            image = self.DEFAULT_IMAGE
+        
+        try:
+            self.client.images.get(image)
+            return True
+        except docker.errors.ImageNotFound:
+            print(f"[*] Image '{image}' not found locally.")
+            print(f"[*] Pulling '{image}' from registry...")
+            try:
+                self.client.images.pull(image)
+                print(f"[✓] Image '{image}' pulled successfully.")
+                return True
+            except docker.errors.APIError as e:
+                print(f"Error: Failed to pull image '{image}': {e}", file=sys.stderr)
+                return False
     
     def container_exists(self, name: str) -> bool:
         """Check if a container exists"""
@@ -36,13 +57,20 @@ class DockerManager:
     def create_container(
         self,
         name: str,
-        image: str = "nihil:local",
+        image: str = None,
         privileged: bool = False,
         volumes: Optional[Dict] = None,
         network_mode: Optional[str] = None,
         workspace: Optional[str] = None
     ):
         """Create a new container"""
+        if image is None:
+            image = self.DEFAULT_IMAGE
+        
+        # Ensure image exists before creating container
+        if not self.ensure_image_exists(image):
+            sys.exit(1)
+        
         container_config = {
             "name": name,
             "image": image,
@@ -68,10 +96,6 @@ class DockerManager:
         try:
             container = self.client.containers.create(**container_config)
             return container
-        except docker.errors.ImageNotFound:
-            print(f"Error: Image '{image}' doesn't exist.", file=sys.stderr)
-            print(f"Build it with: docker build -t {image} nihil-images/", file=sys.stderr)
-            sys.exit(1)
         except docker.errors.APIError as e:
             print(f"Error creating container: {e}", file=sys.stderr)
             sys.exit(1)
@@ -136,4 +160,3 @@ class DockerManager:
         import subprocess
         container_id = container.id
         subprocess.run(["docker", "exec", "-it", container_id, command])
-
