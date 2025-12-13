@@ -46,6 +46,12 @@ Examples:
         "version",
         help="Display Nihil version"
     )
+
+    # Command: doctor
+    doctor_parser = subparsers.add_parser(
+        "doctor",
+        help="Run diagnostics checks (Docker, image, environment)"
+    )
     
     # Command: start
     start_parser = subparsers.add_parser(

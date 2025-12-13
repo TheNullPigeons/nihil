@@ -9,6 +9,7 @@ from nihil.nihilHelp import create_parser
 from nihil.nihilFormatter import NihilFormatter
 from nihil.nihilError import NihilError
 from nihil import __version__
+from nihil.nihilDoctor import NihilDoctor
 
 
 class NihilController:
@@ -30,6 +31,10 @@ class NihilController:
         if parsed_args.command == "version":
             print(f"Nihil version {__version__}")
             return 0
+
+        if parsed_args.command == "doctor":
+            doctor = NihilDoctor(formatter=self.formatter)
+            return doctor.run()
         
         # Initialize Docker manager for commands that need it
         try:
