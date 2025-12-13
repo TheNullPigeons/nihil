@@ -6,6 +6,14 @@ import docker
 from typing import Optional, Dict, List
 import sys
 from nihil.nihilFormatter import NihilFormatter
+from nihil.nihilError import (
+    DockerUnavailable,
+    ImagePullFailed,
+    ContainerCreateFailed,
+    ContainerStartFailed,
+    ContainerStopFailed,
+    ContainerRemoveFailed,
+)
 
 
 class NihilManager:
@@ -19,9 +27,7 @@ class NihilManager:
             self.client.ping()
             self.formatter = NihilFormatter()
         except docker.errors.DockerException as e:
-            formatter = NihilFormatter()
-            print(formatter.error(f"Unable to connect to Docker: {e}"), file=sys.stderr)
-            sys.exit(1)
+            raise DockerUnavailable(f"Impossible de se connecter à Docker: {e}")
     
     def ensure_image_exists(self, image: str = None) -> bool:
         """Ensure the image exists, pull from ghcr.io if not found"""
@@ -39,8 +45,7 @@ class NihilManager:
                 print(self.formatter.success(f"Image '{image}' pulled successfully."))
                 return True
             except docker.errors.APIError as e:
-                print(self.formatter.error(f"Failed to pull image '{image}': {e}"), file=sys.stderr)
-                return False
+                raise ImagePullFailed(image=image, message=f"Échec du pull de l'image '{image}': {e}")
     
     def container_exists(self, name: str) -> bool:
         """Check if a container exists"""
@@ -71,8 +76,7 @@ class NihilManager:
             image = self.DEFAULT_IMAGE
         
         # Ensure image exists before creating container
-        if not self.ensure_image_exists(image):
-            sys.exit(1)
+        self.ensure_image_exists(image)
         
         container_config = {
             "name": name,
@@ -100,8 +104,7 @@ class NihilManager:
             container = self.client.containers.create(**container_config)
             return container
         except docker.errors.APIError as e:
-            print(f"Error creating container: {e}", file=sys.stderr)
-            sys.exit(1)
+            raise ContainerCreateFailed(name=name, message=f"Erreur création conteneur: {e}")
     
     def start_container(self, container) -> bool:
         """Start a container"""
@@ -109,8 +112,7 @@ class NihilManager:
             container.start()
             return True
         except docker.errors.APIError as e:
-            print(f"Error starting container: {e}", file=sys.stderr)
-            return False
+            raise ContainerStartFailed(name=getattr(container, "name", "<unknown>"), message=f"Erreur start: {e}")
     
     def stop_container(self, container) -> bool:
         """Stop a container"""
@@ -118,8 +120,7 @@ class NihilManager:
             container.stop()
             return True
         except docker.errors.APIError as e:
-            print(f"Error stopping container: {e}", file=sys.stderr)
-            return False
+            raise ContainerStopFailed(name=getattr(container, "name", "<unknown>"), message=f"Erreur stop: {e}")
     
     def remove_container(self, container, force: bool = False) -> bool:
         """Remove a container"""
@@ -127,8 +128,7 @@ class NihilManager:
             container.remove(force=force)
             return True
         except docker.errors.APIError as e:
-            print(f"Error removing container: {e}", file=sys.stderr)
-            return False
+            raise ContainerRemoveFailed(name=getattr(container, "name", "<unknown>"), message=f"Erreur remove: {e}")
     
     def list_containers(self, all: bool = True) -> List:
         """List all nihil containers"""
@@ -140,7 +140,7 @@ class NihilManager:
                 try:
                     if c.image.tags and any("nihil" in tag for tag in c.image.tags):
                         nihil_containers.append(c)
-                except:
+                except Exception:
                     # Ignore containers with problematic images
                     pass
             return nihil_containers
