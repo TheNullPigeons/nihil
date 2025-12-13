@@ -7,6 +7,7 @@ from typing import Optional
 from nihil.nihilManager import NihilManager
 from nihil.nihilHelp import create_parser
 from nihil.nihilFormatter import NihilFormatter
+from nihil.nihilError import NihilError
 from nihil import __version__
 
 
@@ -33,8 +34,9 @@ class NihilController:
         # Initialize Docker manager for commands that need it
         try:
             self.manager = NihilManager()
-        except SystemExit:
-            return 1
+        except NihilError as e:
+            print(self.formatter.error(str(e)), file=sys.stderr)
+            return e.exit_code
         
         if parsed_args.command == "info":
             return self._cmd_info()
@@ -62,10 +64,8 @@ class NihilController:
                 print(self.formatter.warning(f"Container '{container_name}' is already running."))
             else:
                 print(self.formatter.info(f"Starting container '{container_name}'..."))
-                if self.manager.start_container(container):
-                    print(self.formatter.success(f"Container '{container_name}' started successfully."))
-                else:
-                    return 1
+                self.manager.start_container(container)
+                print(self.formatter.success(f"Container '{container_name}' started successfully."))
         else:
             print(self.formatter.info(f"Container '{container_name}' doesn't exist. Creating..."))
             container = self.manager.create_container(
@@ -76,10 +76,8 @@ class NihilController:
             )
             print(self.formatter.info(f"Container '{container_name}' created."))
             print(self.formatter.info(f"Starting container '{container_name}'..."))
-            if self.manager.start_container(container):
-                print(self.formatter.success(f"Container '{container_name}' created and started successfully."))
-            else:
-                return 1
+            self.manager.start_container(container)
+            print(self.formatter.success(f"Container '{container_name}' created and started successfully."))
         
         # Connect to container if requested
         if not args.no_shell:
@@ -102,10 +100,9 @@ class NihilController:
             return 0
         
         print(self.formatter.info(f"Stopping container '{container_name}'..."))
-        if self.manager.stop_container(container):
-            print(self.formatter.success(f"Container '{container_name}' stopped successfully."))
-            return 0
-        return 1
+        self.manager.stop_container(container)
+        print(self.formatter.success(f"Container '{container_name}' stopped successfully."))
+        return 0
     
     def _cmd_remove(self, args) -> int:
         """Remove one or more containers"""
@@ -125,10 +122,8 @@ class NihilController:
                 self.manager.stop_container(container)
             
             print(self.formatter.info(f"Removing container '{container_name}'..."))
-            if self.manager.remove_container(container, force=args.force):
-                print(self.formatter.success(f"Container '{container_name}' removed successfully."))
-            else:
-                errors += 1
+            self.manager.remove_container(container, force=args.force)
+            print(self.formatter.success(f"Container '{container_name}' removed successfully."))
         
         return 1 if errors > 0 else 0
     
@@ -189,6 +184,10 @@ def main() -> int:
         formatter = NihilFormatter()
         print(f"\n\n{formatter.warning('User interruption.')}")
         return 130
+    except NihilError as e:
+        formatter = NihilFormatter()
+        print(formatter.error(str(e)), file=sys.stderr)
+        return e.exit_code
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
