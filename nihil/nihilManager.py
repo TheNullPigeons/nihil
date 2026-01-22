@@ -13,6 +13,7 @@ from nihil.nihilError import (
     ContainerStartFailed,
     ContainerStopFailed,
     ContainerRemoveFailed,
+    ImageRemoveFailed,
 )
 
 
@@ -138,7 +139,15 @@ class NihilManager:
             nihil_containers = []
             for c in containers:
                 try:
-                    if c.image.tags and any("nihil" in tag for tag in c.image.tags):
+                    # Check if the container was created with a nihil image
+                    # This works even if the image tag was removed
+                    config_image = c.attrs.get('Config', {}).get('Image', '')
+                    
+                    # Check both the current tags and the original image name
+                    has_nihil_tag = c.image.tags and any("nihil" in tag for tag in c.image.tags)
+                    created_from_nihil = "nihil" in config_image.lower()
+                    
+                    if has_nihil_tag or created_from_nihil:
                         nihil_containers.append(c)
                 except Exception:
                     # Ignore containers with problematic images
@@ -163,3 +172,48 @@ class NihilManager:
         import subprocess
         container_id = container.id
         subprocess.run(["docker", "exec", "-it", container_id, command])
+    
+    def remove_image(self, image: str, force: bool = False) -> bool:
+        """Remove a docker image
+        
+        Args:
+            image: Image name or ID to remove
+            force: If True, will attempt to remove even if containers are using it
+                   (but Docker will still protect running containers)
+        
+        Returns:
+            True if removal successful, False otherwise
+        """
+        try:
+            # Get image object to check if it exists and get its ID
+            try:
+                img_obj = self.client.images.get(image)
+                image_id = img_obj.id
+            except docker.errors.ImageNotFound:
+                raise ImageRemoveFailed(image=image, message=f"Image '{image}' not found locally.")
+            
+            # Try to remove the image (Docker will protect containers automatically)
+            # We use force=False by default to let Docker handle protection
+            self.client.images.remove(image=image_id, force=False, noprune=False)
+            return True
+            
+        except docker.errors.APIError as e:
+            if e.response.status_code == 409:
+                # Image is being used by a container
+                if force:
+                    # Even with --force, we explain that containers must be removed first
+                    raise ImageRemoveFailed(
+                        image=image, 
+                        message=f"Image '{image}' cannot be deleted because it is currently used by one or more containers. "
+                                f"Remove all containers using this image first with 'nihil remove <container_name>'."
+                    )
+                else:
+                    raise ImageRemoveFailed(
+                        image=image,
+                        message=f"Image '{image}' is currently used by a container. "
+                                f"Use --force to see which containers are using it, or remove them first."
+                    )
+            elif e.response.status_code == 404:
+                raise ImageRemoveFailed(image=image, message=f"Image '{image}' not found.")
+            else:
+                raise ImageRemoveFailed(image=image, message=f"Error removing image: {e}")

@@ -114,3 +114,10 @@ class ContainerRemoveFailed(NihilError):
         self.name = name
 
 
+
+class ImageRemoveFailed(NihilError):
+    """Raised when removing an image fails."""
+
+    def __init__(self, image: str, message: Optional[str] = None):
+        super().__init__(message=message or f"Échec de suppression de l'image: '{image}'", exit_code=10)
+        self.image = image

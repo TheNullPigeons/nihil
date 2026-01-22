@@ -53,6 +53,8 @@ class NihilController:
             return self._cmd_remove(parsed_args)
         elif parsed_args.command == "exec":
             return self._cmd_exec(parsed_args)
+        elif parsed_args.command == "uninstall":
+            return self._cmd_uninstall(parsed_args)
         
         return 0
     
@@ -148,6 +150,87 @@ class NihilController:
         command = " ".join(args.command) if args.command else "bash"
         self.manager.exec_in_container(container, command)
         return 0
+    
+    def _cmd_uninstall(self, args) -> int:
+        """Remove nihil images"""
+        images = args.names
+        if not images:
+            images = [self.manager.DEFAULT_IMAGE]
+        
+        # Check which containers are using these images
+        containers_to_remove = []
+        for image in images:
+            try:
+                img_obj = self.manager.client.images.get(image)
+                # Find containers using this image
+                all_containers = self.manager.client.containers.list(all=True)
+                for c in all_containers:
+                    if c.image.id == img_obj.id:
+                        containers_to_remove.append(c.name)
+            except Exception:
+                pass  # Image might not exist, will be handled later
+        
+        # Display what will be removed
+        print(self.formatter.warning(f"Images to be removed: {', '.join(images)}"))
+        
+        if containers_to_remove:
+            print(self.formatter.warning(f"The following containers are using these images:"))
+            for container_name in containers_to_remove:
+                print(f"  • {container_name}")
+            print()
+            
+            # Ask if user wants to remove containers too
+            try:
+                remove_containers = input(self.formatter.info("Do you want to remove these containers too? [y/N] "))
+            except EOFError:
+                remove_containers = 'n'
+            
+            if remove_containers.lower() in ['y', 'yes']:
+                # Remove containers first
+                print()
+                for container_name in containers_to_remove:
+                    try:
+                        container = self.manager.get_container(container_name)
+                        if container:
+                            if container.status == "running":
+                                print(self.formatter.info(f"Stopping container '{container_name}'..."))
+                                self.manager.stop_container(container)
+                            print(self.formatter.info(f"Removing container '{container_name}'..."))
+                            self.manager.remove_container(container, force=True)
+                            print(self.formatter.success(f"Container '{container_name}' removed successfully."))
+                    except Exception as e:
+                        print(self.formatter.error(f"Failed to remove container '{container_name}': {e}"), file=sys.stderr)
+                print()
+            else:
+                print(self.formatter.error("Cannot remove images while containers are using them. Aborting."))
+                return 1
+        
+        # Final confirmation for image removal
+        if args.force:
+            print(self.formatter.warning("--force flag is set (not needed if containers were removed)"))
+        
+        try:
+            confirm = input(self.formatter.info("Proceed with image removal? [y/N] "))
+        except EOFError:
+            confirm = 'n'
+        
+        if confirm.lower() not in ['y', 'yes']:
+            print("Aborted.")
+            return 0
+        
+        # Remove images
+        errors = 0
+        for image in images:
+            print(self.formatter.info(f"Removing image '{image}'..."))
+            try:
+                self.manager.remove_image(image, force=args.force)
+                print(self.formatter.success(f"Image '{image}' removed successfully."))
+            except Exception as e: 
+                # Catching broadly to print error via formatter
+                print(self.formatter.error(str(e)), file=sys.stderr)
+                errors += 1
+        
+        return 1 if errors > 0 else 0
     
     def _cmd_info(self) -> int:
         """Display information about images and containers"""
