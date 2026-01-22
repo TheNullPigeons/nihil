@@ -20,6 +20,7 @@ Examples:
   nihil start pentest --privileged     Start a privileged container
   nihil exec pentest                   Connect to a container
   nihil remove test1 test2 --force     Remove multiple containers
+  nihil uninstall                      Remove default image
         """
     )
     
@@ -78,6 +79,14 @@ Examples:
     )
     remove_parser.add_argument("names", nargs="+", help="Container name(s)")
     remove_parser.add_argument("--force", "-f", action="store_true", help="Force removal")
+    
+    # Command: uninstall
+    uninstall_parser = subparsers.add_parser(
+        "uninstall",
+        help="Remove nihil images"
+    )
+    uninstall_parser.add_argument("names", nargs="*", help="Image name(s)")
+    uninstall_parser.add_argument("--force", "-f", action="store_true", help="Force removal")
     
     # Command: exec
     exec_parser = subparsers.add_parser(
