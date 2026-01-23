@@ -167,7 +167,7 @@ class NihilManager:
             print(f"Error retrieving images: {e}", file=sys.stderr)
             return []
     
-    def exec_in_container(self, container, command: str = "bash"):
+    def exec_in_container(self, container, command: str = "zsh"):
         """Execute a command in a container (interactive mode)"""
         import subprocess
         container_id = container.id
