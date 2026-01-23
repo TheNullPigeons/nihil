@@ -90,10 +90,17 @@ class NihilController:
                 print(self.formatter.success(f"Container '{container_name}' started successfully."))
         else:
             print(self.formatter.info(f"Container '{container_name}' doesn't exist. Creating..."))
+            # Map CLI network choices to Docker network modes
+            network_map = {
+                "host": "host",
+                "disabled": "none",
+                "docker": "bridge",
+                "nat": "bridge"
+            }
             container = self.manager.create_container(
                 name=container_name,
                 privileged=args.privileged,
-                network_mode=args.network if args.network else None,
+                network_mode=network_map.get(args.network, "host"),
                 workspace=args.workspace
             )
             print(self.formatter.info(f"Container '{container_name}' created."))
