@@ -277,26 +277,53 @@ class NihilController:
         print(self.formatter.info(f"Nihil version {__version__}\n"))
         
         # Images
-        print(self.formatter.section_header("Available images", "🖼️"))
+        print(self.formatter.section_header("AVAILABLE IMAGES", "🖼️ "))
         images = self.manager.list_images()
         if images:
+            rows = []
             for img in images:
                 tags = ", ".join(img.tags) if img.tags else "<none>"
                 size = f"{img.attrs['Size'] / (1024**3):.2f} GB"
-                print(self.formatter.table_row([tags, size], [30, 10]))
+                rows.append([tags, size])
+            
+            # Pass None for widths to auto-calculate
+            self.formatter.print_table(["IMAGE", "SIZE"], rows, None)
         else:
             print("  No nihil images found.")
         
         # Containers
-        print(self.formatter.section_header("Containers", "🐳"))
+        print(self.formatter.section_header("CONTAINERS", "🐳"))
         containers = self.manager.list_containers()
         if containers:
+            rows = []
             for c in containers:
                 name = c.name
-                status = c.status
-                image = c.image.tags[0] if c.image.tags else "<none>"
-                config = "Privileged: On 🔥" if c.attrs['HostConfig']['Privileged'] else "Standard"
-                print(self.formatter.table_row([name, f"[{status}]", image, config], [20, 12, 15, 20]))
+                status_raw = c.status
+                
+                # Determine status color/icon
+                if status_raw == "running":
+                    status = ("Running 🟢", self.formatter.GREEN)
+                elif status_raw == "exited":
+                    status = ("Stopped 🔴", self.formatter.RED)
+                else:
+                    status = (f"{status_raw}", self.formatter.YELLOW)
+                
+                # Image name clean up
+                image_raw = c.image.tags[0] if c.image.tags else "<none>"
+                image = image_raw.split("/")[-1] if "/" in image_raw else image_raw  # Shorten image name
+                
+                # Config
+                is_privileged = c.attrs['HostConfig']['Privileged']
+                config = ("Privileged 🔥", self.formatter.RED) if is_privileged else "Standard"
+                
+                rows.append([name, status, image, config])
+            
+            # Pass None for widths to auto-calculate
+            self.formatter.print_table(
+                ["NAME", "STATUS", "IMAGE", "CONFIG"], 
+                rows,
+                None
+            )
         else:
             print("  No nihil containers found.")
         
