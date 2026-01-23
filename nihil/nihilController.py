@@ -151,7 +151,7 @@ class NihilController:
             print(self.formatter.error(f"Container '{container_name}' is not running."), file=sys.stderr)
             return 1
         
-        command = " ".join(args.command) if args.command else "bash"
+        command = " ".join(args.command) if args.command else "zsh"
         self.manager.exec_in_container(container, command)
         return 0
     
