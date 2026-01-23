@@ -170,8 +170,12 @@ class NihilManager:
     def exec_in_container(self, container, command: str = "zsh"):
         """Execute a command in a container (interactive mode)"""
         import subprocess
+        import shlex
         container_id = container.id
-        subprocess.run(["docker", "exec", "-it", container_id, command])
+        # Split command string into list for correct execution
+        cmd_args = shlex.split(command)
+        full_command = ["docker", "exec", "-it", container_id] + cmd_args
+        subprocess.run(full_command)
     
     def remove_image(self, image: str, force: bool = False) -> bool:
         """Remove a docker image
