@@ -93,7 +93,7 @@ class NihilController:
         # Connect to container if requested
         if not args.no_shell:
             print(self.formatter.info(f"Connecting to container '{container_name}'..."))
-            self.manager.exec_in_container(container, "bash")
+            self.manager.exec_in_container(container, "zsh")
         
         return 0
     
