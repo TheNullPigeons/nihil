@@ -3,13 +3,15 @@
 """Nihil Controller - Orchestrates command execution"""
 
 import sys
-from typing import Optional
+from typing import Optional, List
+
 from nihil.nihilManager import NihilManager
 from nihil.nihilHelp import create_parser
 from nihil.nihilFormatter import NihilFormatter
 from nihil.nihilError import NihilError
 from nihil import __version__
 from nihil.nihilDoctor import NihilDoctor
+from nihil.nihilHistory import log_command
 
 
 class NihilController:
@@ -55,6 +57,8 @@ class NihilController:
             return self._cmd_exec(parsed_args)
         elif parsed_args.command == "uninstall":
             return self._cmd_uninstall(parsed_args)
+        elif parsed_args.command == "completion":
+            return self._cmd_completion(parsed_args)
         
         return 0
     
@@ -262,20 +266,78 @@ class NihilController:
         
         return 0
 
+    def _cmd_completion(self, args) -> int:
+        """Generate shell completion script (bash or zsh)."""
+        import shutil
+        import subprocess
+
+        shell = args.shell
+
+        tool = shutil.which("register-python-argcomplete")
+        if not tool:
+            print(
+                self.formatter.error(
+                    "register-python-argcomplete n'est pas disponible dans le PATH.\n"
+                    "Installez argcomplete dans le même environnement que Nihil, "
+                    "puis réessayez."
+                ),
+                file=sys.stderr,
+            )
+            return 1
+
+        # Construction de la commande en fonction du shell
+        cmd = [tool]
+        if shell == "zsh":
+            # argcomplete sait générer un snippet adapté à zsh
+            cmd.extend(["--shell", "zsh"])
+        cmd.append("nihil")
+
+        try:
+            # On imprime le script sur stdout pour permettre :
+            #   nihil completion bash | sudo tee /etc/bash_completion.d/nihil
+            #   nihil completion zsh  > ~/.zfunc/_nihil  (par ex.)
+            result = subprocess.run(
+                cmd,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            print(result.stdout, end="")
+            return 0
+        except subprocess.CalledProcessError as e:
+            print(
+                self.formatter.error(
+                    f"Échec de la génération du script de complétion pour {shell} : {e}"
+                ),
+                file=sys.stderr,
+            )
+            return 1
+
 
 def main() -> int:
-    """Main entry point"""
+    """Main entry point with command history logging."""
+    argv: List[str] = sys.argv[1:]
+    exit_code: int
+
     try:
         controller = NihilController()
-        return controller.run()
+        exit_code = controller.run(argv)
     except KeyboardInterrupt:
         formatter = NihilFormatter()
         print(f"\n\n{formatter.warning('User interruption.')}")
-        return 130
+        exit_code = 130
     except NihilError as e:
         formatter = NihilFormatter()
         print(formatter.error(str(e)), file=sys.stderr)
-        return e.exit_code
+        exit_code = e.exit_code
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
-        return 1
+        exit_code = 1
+
+    # Always try to log history, but never fail the CLI if this breaks
+    try:
+        log_command(argv, exit_code)
+    except Exception:
+        pass
+
+    return exit_code
