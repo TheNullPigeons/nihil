@@ -109,9 +109,27 @@ class NihilController:
             print(self.formatter.success(f"Container '{container_name}' created and started successfully."))
         
         # Connect to container if requested
+        # Connect to container if requested
         if not args.no_shell:
+            command = "zsh"
+            if args.log:
+                import datetime
+                timestamp = datetime.datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
+                logfile = f"/workspace/logs/{timestamp}_shell.asciinema"
+                title = f"Nihil Session {timestamp}"
+                
+                # Validate that asciinema is installed (check is implicit via execution failure, but we can try)
+                # But simpler just to run it.
+                
+                # Ensure logs directory exists
+                self.manager.exec_in_container(container, "mkdir -p /workspace/logs")
+                
+                print(self.formatter.info(f"Logging session to {logfile}"))
+                # Use full asciinema command
+                command = f"asciinema rec -i 2 --stdin --quiet --command zsh --title '{title}' {logfile}"
+            
             print(self.formatter.info(f"Connecting to container '{container_name}'..."))
-            self.manager.exec_in_container(container, "zsh")
+            self.manager.exec_in_container(container, command)
         
         return 0
     
