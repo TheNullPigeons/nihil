@@ -5,6 +5,12 @@
 import argparse
 from nihil import __version__
 
+try:
+    # Optionnel : si argcomplete est installé, on active l'auto-complétion
+    import argcomplete  # type: ignore
+except Exception:  # pragma: no cover - complétion ne doit jamais casser la CLI
+    argcomplete = None
+
 
 def create_parser() -> argparse.ArgumentParser:
     """Create and configure the argument parser"""
@@ -95,6 +101,25 @@ Examples:
     )
     exec_parser.add_argument("name", help="Container name")
     exec_parser.add_argument("command", nargs="*", help="Command to execute (default: bash)")
+
+    # Command: completion
+    completion_parser = subparsers.add_parser(
+        "completion",
+        help="Generate shell completion script"
+    )
+    completion_parser.add_argument(
+        "shell",
+        choices=["bash", "zsh"],
+        help="Target shell for completion script (bash or zsh)"
+    )
+    
+    # Activer l'auto-complétion si argcomplete est disponible
+    if argcomplete is not None:
+        try:
+            argcomplete.autocomplete(parser)
+        except Exception:
+            # On ignore toute erreur de complétion pour ne pas impacter la CLI
+            pass
     
     return parser
 
