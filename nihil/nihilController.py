@@ -12,6 +12,7 @@ from nihil.nihilError import NihilError
 from nihil import __version__
 from nihil.nihilDoctor import NihilDoctor
 from nihil.nihilHistory import log_command
+from nihil.nihilBanner import print_compact_banner
 
 
 class NihilController:
@@ -25,6 +26,16 @@ class NihilController:
     def run(self, args: Optional[list] = None) -> int:
         """Run the controller with parsed arguments"""
         parsed_args = self.parser.parse_args(args)
+        
+        # Afficher le banner pour les commandes principales (sauf version, completion, help)
+        should_show_banner = (
+            parsed_args.command is not None and
+            parsed_args.command not in ["version", "completion"]
+        )
+        
+        if should_show_banner:
+            print_compact_banner()
+            print()  # Ligne vide après le banner
         
         if parsed_args.command is None:
             self.parser.print_help()
