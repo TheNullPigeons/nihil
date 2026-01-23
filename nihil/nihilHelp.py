@@ -74,6 +74,7 @@ Examples:
         help="Network mode (default: host)"
     )
     start_parser.add_argument("--workspace", help="Workspace path to mount")
+    start_parser.add_argument("--log", "-l", action="store_true", help="Enable shell logging (asciinema)")
     start_parser.add_argument("--no-shell", action="store_true", help="Don't open shell after starting")
     
     # Command: stop
