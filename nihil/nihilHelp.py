@@ -67,7 +67,12 @@ Examples:
     )
     start_parser.add_argument("name", help="Container name")
     start_parser.add_argument("--privileged", action="store_true", help="Privileged mode")
-    start_parser.add_argument("--network", help="Network mode (e.g., host)")
+    start_parser.add_argument(
+        "--network", 
+        choices=["docker", "host", "disabled", "nat"],
+        default="host",
+        help="Network mode (default: host)"
+    )
     start_parser.add_argument("--workspace", help="Workspace path to mount")
     start_parser.add_argument("--no-shell", action="store_true", help="Don't open shell after starting")
     
