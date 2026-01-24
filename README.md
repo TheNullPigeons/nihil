@@ -250,6 +250,21 @@ nihil remove test1 test2 test3 --force
 # Your files in ~/my-project are preserved even after container removal
 nihil start project --workspace ~/my-project
 ```
+## 🛠️ Outils disponibles
+
+Le dépôt nihil fournit plusieurs outils de pentest :
+
+- **netpath** - Découverte intelligente de chemins d'attaque réseau avec interface TUI
+- **netexec** - The Network Execution tool (successor to CrackMapExec)
+- Autres outils disponibles via `pacman -Sl nihil`
+
+Installation dans un conteneur :
+```bash
+nihil start my-pentest
+# Dans le conteneur :
+pacman -S netpath netexec
+```
+
 ## 📚 Documentation complète
 
 Pour plus de détails, consultez la [documentation complète](docs/README.md) :
@@ -259,7 +274,7 @@ Pour plus de détails, consultez la [documentation complète](docs/README.md) :
 - [Image Docker](docs/docker-image.md) - Personnalisation de l'image
 - [Auto-complétion](docs/autocompletion.md) - Configuration bash/zsh
 - [Historique](docs/history.md) - Utilisation de l'historique
-- [Dépôt Arch](docs/arch-repo.md) - Utilisation du dépôt nihil
+- [Dépôt Arch](docs/arch-repo.md) - Utilisation du dépôt nihil et outils disponibles
 - [Développement](docs/development.md) - Guide pour développeurs
 - [FAQ](docs/faq.md) - Questions fréquentes
 
