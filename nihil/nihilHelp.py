@@ -81,9 +81,9 @@ Examples:
     )
     start_parser.add_argument(
         "--image",
-        choices=["base", "ad", "active-directory"],
-        default="base",
-        help="Image variant to use (default: base). Use 'ad' or 'active-directory' for AD tools."
+        choices=["base", "ad", "active-directory", "web-hacking", "pwn-crypto"],
+        default=None,
+        help="Image variant to use. If not specified, you will be prompted to select one."
     )
     start_parser.add_argument("--workspace", help="Workspace path to mount")
     start_parser.add_argument("--log", "-l", action="store_true", help="Enable shell logging (asciinema)")
