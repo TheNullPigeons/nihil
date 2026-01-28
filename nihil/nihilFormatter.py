@@ -28,7 +28,7 @@ class NihilFormatter:
         if self.use_colors:
             return f"{color}{text}{self.RESET}"
         return text
-    
+
     def _strip_ansi(self, text: str) -> str:
         """Remove ANSI color codes from text to get real length"""
         import re

@@ -267,7 +267,7 @@ class NihilController:
             description = "Base image (OS + core tools)" if variant == "base" else "Active Directory tools (base + AD tools)"
             rows.append([variant, image_url, description])
         
-        self.formatter.print_table(["VARIANT", "IMAGE", "DESCRIPTION"], rows, [12, 45, 40])
+        self.formatter.print_table(["VARIANT", "IMAGE", "DESCRIPTION"], rows)
         print()
         print(self.formatter.info("Usage: nihil start <name> --image <variant>"))
         return 0
@@ -284,7 +284,7 @@ class NihilController:
             description = "Base image (OS + core tools)" if variant == "base" else "Active Directory tools (base + AD tools)"
             rows.append([variant, image_url, description])
         
-        self.formatter.print_table(["VARIANT", "IMAGE", "DESCRIPTION"], rows, [12, 45, 40])
+        self.formatter.print_table(["VARIANT", "IMAGE", "DESCRIPTION"], rows)
         print()
         print(self.formatter.info("Use 'nihil start <name> --image <variant>' to create a container with a specific image."))
         print()
@@ -312,9 +312,9 @@ class NihilController:
                 status_raw = c.status
                 
                 if status_raw == "running":
-                    status = ("Running 🟢", self.formatter.GREEN)
+                    status = ("Running", self.formatter.GREEN)
                 elif status_raw == "exited":
-                    status = ("Stopped 🔴", self.formatter.RED)
+                    status = ("Stopped", self.formatter.RED)
                 else:
                     status = (f"{status_raw}", self.formatter.YELLOW)
                 
@@ -327,7 +327,7 @@ class NihilController:
                     image = image_raw
                 
                 is_privileged = c.attrs['HostConfig']['Privileged']
-                config = ("Privileged 🔥", self.formatter.RED) if is_privileged else "Standard"
+                config = ("Privileged", self.formatter.RED) if is_privileged else "Standard"
                 
                 rows.append([name, status, image, config])
             

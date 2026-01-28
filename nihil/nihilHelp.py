@@ -48,6 +48,12 @@ Examples:
         help="Display information about images and containers"
     )
     
+    # Command: images
+    images_parser = subparsers.add_parser(
+        "images",
+        help="List available image variants"
+    )
+    
     # Command: version
     version_parser = subparsers.add_parser(
         "version",
@@ -72,6 +78,12 @@ Examples:
         choices=["docker", "host", "disabled", "nat"],
         default="host",
         help="Network mode (default: host)"
+    )
+    start_parser.add_argument(
+        "--image",
+        choices=["base", "ad", "active-directory"],
+        default="base",
+        help="Image variant to use (default: base). Use 'ad' or 'active-directory' for AD tools."
     )
     start_parser.add_argument("--workspace", help="Workspace path to mount")
     start_parser.add_argument("--log", "-l", action="store_true", help="Enable shell logging (asciinema)")
