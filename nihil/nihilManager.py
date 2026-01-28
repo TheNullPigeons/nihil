@@ -22,6 +22,13 @@ class NihilManager:
     
     DEFAULT_IMAGE = "ghcr.io/thenullpigeons/nihil-images:latest"
     
+    # Images disponibles
+    AVAILABLE_IMAGES = {
+        "base": "ghcr.io/thenullpigeons/nihil-images:latest",
+        "ad": "ghcr.io/thenullpigeons/nihil-images-ad:latest",
+        "active-directory": "ghcr.io/thenullpigeons/nihil-images-ad:latest",
+    }
+    
     def __init__(self):
         try:
             self.client = docker.from_env()
