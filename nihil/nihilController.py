@@ -96,8 +96,50 @@ class NihilController:
                 "docker": "bridge",
                 "nat": "bridge"
             }
-            image = self.manager.AVAILABLE_IMAGES.get(args.image, self.manager.DEFAULT_IMAGE)
-            print(self.formatter.info(f"Using image variant: {args.image} ({image})"))
+            
+            # Determine image variant
+            image_arg = args.image
+            if image_arg is None:
+                # Interactive selection using Rich
+                from rich.console import Console
+                from rich.prompt import IntPrompt
+                
+                console = Console()
+                print(self.formatter.info("No image specified. Please select one:"))
+                
+                variants = [v for v in self.manager.AVAILABLE_IMAGES.keys() if v != "active-directory"]
+                # Ensure specific order if desired, or sort it
+                # variants.sort() 
+                
+                rows = []
+                for i, variant in enumerate(variants):
+                    # Simple descriptions mapping
+                    desc = "Base image"
+                    if "ad" in variant or "active-directory" in variant:
+                        desc = "Active Directory tools"
+                    elif "web" in variant:
+                        desc = "Web Hacking tools"
+                    elif "pwn" in variant or "crypto" in variant:
+                        desc = "Pwn & Crypto tools"
+                    
+                    rows.append([str(i+1), variant, desc])
+                
+                self.formatter.print_table(["#", "VARIANT", "DESCRIPTION"], rows)
+                
+                choices_indices = list(range(1, len(variants) + 1))
+                try:
+                    choice = IntPrompt.ask(
+                        "Select an image", 
+                        choices=[str(c) for c in choices_indices],
+                        default=1
+                    )
+                    image_arg = variants[choice - 1]
+                except KeyboardInterrupt:
+                    print("\nAborted.")
+                    return 1
+            
+            image = self.manager.AVAILABLE_IMAGES.get(image_arg, self.manager.DEFAULT_IMAGE)
+            print(self.formatter.info(f"Using image variant: {image_arg} ({image})"))
             
             container = self.manager.create_container(
                 name=container_name,
@@ -327,7 +369,7 @@ class NihilController:
                     image = image_raw
                 
                 is_privileged = c.attrs['HostConfig']['Privileged']
-                config = ("Privileged", self.formatter.RED) if is_privileged else "Standard"
+                config = ("Privileged 💥", self.formatter.RED) if is_privileged else "Standard"
                 
                 rows.append([name, status, image, config])
             
