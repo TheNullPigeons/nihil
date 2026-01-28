@@ -93,6 +93,7 @@ class NihilManager:
             "tty": True,
             "stdin_open": True,
             "privileged": privileged,
+            "hostname": name,
         }
         
         # Configure workspace volume
