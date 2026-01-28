@@ -27,7 +27,6 @@ class NihilController:
         """Run the controller with parsed arguments"""
         parsed_args = self.parser.parse_args(args)
         
-        # Afficher le banner pour les commandes principales (sauf version, completion, help)
         should_show_banner = (
             parsed_args.command is not None and
             parsed_args.command not in ["version", "completion"]
@@ -35,7 +34,7 @@ class NihilController:
         
         if should_show_banner:
             print_compact_banner()
-            print()  # Ligne vide après le banner
+            print()
         
         if parsed_args.command is None:
             self.parser.print_help()
@@ -49,7 +48,6 @@ class NihilController:
             doctor = NihilDoctor(formatter=self.formatter)
             return doctor.run()
         
-        # Initialize Docker manager for commands that need it
         try:
             self.manager = NihilManager()
         except NihilError as e:
@@ -58,6 +56,8 @@ class NihilController:
         
         if parsed_args.command == "info":
             return self._cmd_info()
+        elif parsed_args.command == "images":
+            return self._cmd_images()
         elif parsed_args.command == "start":
             return self._cmd_start(parsed_args)
         elif parsed_args.command == "stop":
@@ -90,15 +90,18 @@ class NihilController:
                 print(self.formatter.success(f"Container '{container_name}' started successfully."))
         else:
             print(self.formatter.info(f"Container '{container_name}' doesn't exist. Creating..."))
-            # Map CLI network choices to Docker network modes
             network_map = {
                 "host": "host",
                 "disabled": "none",
                 "docker": "bridge",
                 "nat": "bridge"
             }
+            image = self.manager.AVAILABLE_IMAGES.get(args.image, self.manager.DEFAULT_IMAGE)
+            print(self.formatter.info(f"Using image variant: {args.image} ({image})"))
+            
             container = self.manager.create_container(
                 name=container_name,
+                image=image,
                 privileged=args.privileged,
                 network_mode=network_map.get(args.network, "host"),
                 workspace=args.workspace
@@ -108,8 +111,6 @@ class NihilController:
             self.manager.start_container(container)
             print(self.formatter.success(f"Container '{container_name}' created and started successfully."))
         
-        # Connect to container if requested
-        # Connect to container if requested
         if not args.no_shell:
             command = "zsh"
             if args.log:
@@ -117,15 +118,8 @@ class NihilController:
                 timestamp = datetime.datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
                 logfile = f"/workspace/logs/{timestamp}_shell.asciinema"
                 title = f"Nihil Session {timestamp}"
-                
-                # Validate that asciinema is installed (check is implicit via execution failure, but we can try)
-                # But simpler just to run it.
-                
-                # Ensure logs directory exists
                 self.manager.exec_in_container(container, "mkdir -p /workspace/logs")
-                
                 print(self.formatter.info(f"Logging session to {logfile}"))
-                # Use full asciinema command
                 command = f"asciinema rec -i 2 --stdin --quiet --command zsh --title '{title}' {logfile}"
             
             print(self.formatter.info(f"Connecting to container '{container_name}'..."))
@@ -163,7 +157,6 @@ class NihilController:
                 errors += 1
                 continue
             
-            # Stop container if running
             if container.status == "running":
                 print(self.formatter.info(f"Stopping container '{container_name}'..."))
                 self.manager.stop_container(container)
@@ -197,20 +190,17 @@ class NihilController:
         if not images:
             images = [self.manager.DEFAULT_IMAGE]
         
-        # Check which containers are using these images
         containers_to_remove = []
         for image in images:
             try:
                 img_obj = self.manager.client.images.get(image)
-                # Find containers using this image
                 all_containers = self.manager.client.containers.list(all=True)
                 for c in all_containers:
                     if c.image.id == img_obj.id:
                         containers_to_remove.append(c.name)
             except Exception:
-                pass  # Image might not exist, will be handled later
+                pass
         
-        # Display what will be removed
         print(self.formatter.warning(f"Images to be removed: {', '.join(images)}"))
         
         if containers_to_remove:
@@ -219,14 +209,12 @@ class NihilController:
                 print(f"  • {container_name}")
             print()
             
-            # Ask if user wants to remove containers too
             try:
                 remove_containers = input(self.formatter.info("Do you want to remove these containers too? [y/N] "))
             except EOFError:
                 remove_containers = 'n'
             
             if remove_containers.lower() in ['y', 'yes']:
-                # Remove containers first
                 print()
                 for container_name in containers_to_remove:
                     try:
@@ -245,7 +233,6 @@ class NihilController:
                 print(self.formatter.error("Cannot remove images while containers are using them. Aborting."))
                 return 1
         
-        # Final confirmation for image removal
         if args.force:
             print(self.formatter.warning("--force flag is set (not needed if containers were removed)"))
         
@@ -258,26 +245,51 @@ class NihilController:
             print("Aborted.")
             return 0
         
-        # Remove images
         errors = 0
         for image in images:
             print(self.formatter.info(f"Removing image '{image}'..."))
             try:
                 self.manager.remove_image(image, force=args.force)
                 print(self.formatter.success(f"Image '{image}' removed successfully."))
-            except Exception as e: 
-                # Catching broadly to print error via formatter
+            except Exception as e:
                 print(self.formatter.error(str(e)), file=sys.stderr)
                 errors += 1
         
         return 1 if errors > 0 else 0
     
+    def _cmd_images(self) -> int:
+        """List available image variants"""
+        print(self.formatter.section_header("AVAILABLE IMAGE VARIANTS", "📦 "))
+        rows = []
+        for variant, image_url in self.manager.AVAILABLE_IMAGES.items():
+            if variant == "active-directory":
+                continue
+            description = "Base image (OS + core tools)" if variant == "base" else "Active Directory tools (base + AD tools)"
+            rows.append([variant, image_url, description])
+        
+        self.formatter.print_table(["VARIANT", "IMAGE", "DESCRIPTION"], rows, [12, 45, 40])
+        print()
+        print(self.formatter.info("Usage: nihil start <name> --image <variant>"))
+        return 0
+    
     def _cmd_info(self) -> int:
         """Display information about images and containers"""
         print(self.formatter.info(f"Nihil version {__version__}\n"))
         
-        # Images
-        print(self.formatter.section_header("AVAILABLE IMAGES", "🖼️ "))
+        print(self.formatter.section_header("AVAILABLE IMAGE VARIANTS", "📦 "))
+        rows = []
+        for variant, image_url in self.manager.AVAILABLE_IMAGES.items():
+            if variant == "active-directory":
+                continue
+            description = "Base image (OS + core tools)" if variant == "base" else "Active Directory tools (base + AD tools)"
+            rows.append([variant, image_url, description])
+        
+        self.formatter.print_table(["VARIANT", "IMAGE", "DESCRIPTION"], rows, [12, 45, 40])
+        print()
+        print(self.formatter.info("Use 'nihil start <name> --image <variant>' to create a container with a specific image."))
+        print()
+        
+        print(self.formatter.section_header("INSTALLED IMAGES", "🖼️ "))
         images = self.manager.list_images()
         if images:
             rows = []
@@ -286,12 +298,11 @@ class NihilController:
                 size = f"{img.attrs['Size'] / (1024**3):.2f} GB"
                 rows.append([tags, size])
             
-            # Pass None for widths to auto-calculate
-            self.formatter.print_table(["IMAGE", "SIZE"], rows, None)
+            self.formatter.print_table(["IMAGE", "SIZE"], rows, [50, 12])
         else:
-            print("  No nihil images found.")
+            print("  No nihil images installed locally.")
+            print("  Use 'nihil start <name> --image <variant>' to pull and use an image.")
         
-        # Containers
         print(self.formatter.section_header("CONTAINERS", "🐳"))
         containers = self.manager.list_containers()
         if containers:
@@ -300,7 +311,6 @@ class NihilController:
                 name = c.name
                 status_raw = c.status
                 
-                # Determine status color/icon
                 if status_raw == "running":
                     status = ("Running 🟢", self.formatter.GREEN)
                 elif status_raw == "exited":
@@ -308,21 +318,33 @@ class NihilController:
                 else:
                     status = (f"{status_raw}", self.formatter.YELLOW)
                 
-                # Image name clean up
                 image_raw = c.image.tags[0] if c.image.tags else "<none>"
-                image = image_raw.split("/")[-1] if "/" in image_raw else image_raw  # Shorten image name
+                if "/" in image_raw:
+                    image = image_raw.split("/")[-1]
+                    if image.startswith("nihil-images"):
+                        image = image.replace("nihil-images", "nihil", 1)
+                else:
+                    image = image_raw
                 
-                # Config
                 is_privileged = c.attrs['HostConfig']['Privileged']
                 config = ("Privileged 🔥", self.formatter.RED) if is_privileged else "Standard"
                 
                 rows.append([name, status, image, config])
             
-            # Pass None for widths to auto-calculate
+            def get_text_length(cell):
+                if isinstance(cell, tuple):
+                    return len(str(cell[0]))
+                return len(str(cell))
+            
+            name_width = max(len("NAME"), max(get_text_length(row[0]) for row in rows)) + 2
+            status_width = max(len("STATUS"), max(get_text_length(row[1]) for row in rows)) + 2
+            image_width = max(len("IMAGE"), max(get_text_length(row[2]) for row in rows)) + 2
+            config_width = max(len("CONFIG"), max(get_text_length(row[3]) for row in rows)) + 2
+            
             self.formatter.print_table(
                 ["NAME", "STATUS", "IMAGE", "CONFIG"], 
                 rows,
-                None
+                [name_width, status_width, image_width, config_width]
             )
         else:
             print("  No nihil containers found.")
@@ -348,17 +370,12 @@ class NihilController:
             )
             return 1
 
-        # Construction de la commande en fonction du shell
         cmd = [tool]
         if shell == "zsh":
-            # argcomplete sait générer un snippet adapté à zsh
             cmd.extend(["--shell", "zsh"])
         cmd.append("nihil")
 
         try:
-            # On imprime le script sur stdout pour permettre :
-            #   nihil completion bash | sudo tee /etc/bash_completion.d/nihil
-            #   nihil completion zsh  > ~/.zfunc/_nihil  (par ex.)
             result = subprocess.run(
                 cmd,
                 check=True,
@@ -397,7 +414,6 @@ def main() -> int:
         print(f"Error: {e}", file=sys.stderr)
         exit_code = 1
 
-    # Always try to log history, but never fail the CLI if this breaks
     try:
         log_command(argv, exit_code)
     except Exception:
