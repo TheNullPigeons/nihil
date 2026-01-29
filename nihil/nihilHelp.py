@@ -101,7 +101,7 @@ Examples:
         "remove",
         help="Remove one or more containers"
     )
-    remove_parser.add_argument("names", nargs="+", help="Container name(s)")
+    remove_parser.add_argument("names", nargs="*", help="Container name(s)")
     remove_parser.add_argument("--force", "-f", action="store_true", help="Force removal")
     
     # Command: uninstall
