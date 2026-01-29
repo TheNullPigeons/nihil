@@ -81,7 +81,7 @@ Examples:
     )
     start_parser.add_argument(
         "--image",
-        choices=["base", "ad", "active-directory", "web-hacking", "pwn-crypto"],
+        choices=["base", "ad", "active-directory", "web", "crypto"],
         default=None,
         help="Image variant to use. If not specified, you will be prompted to select one."
     )
