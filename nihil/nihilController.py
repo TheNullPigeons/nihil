@@ -190,8 +190,73 @@ class NihilController:
     def _cmd_remove(self, args) -> int:
         """Remove one or more containers"""
         container_names = args.names
-        errors = 0
         
+        if not container_names:
+            # Interactive selection loop
+            from rich.prompt import Prompt
+            from rich.console import Console
+            
+            console = Console()
+            nihil_containers = self.manager.list_containers(all=True)
+            
+            if not nihil_containers:
+                print("No nihil containers found.")
+                return 0
+                
+            selected_containers = []
+            
+            while True:
+                # Refresh list (excluding already selected)
+                available_containers = [c for c in nihil_containers if c.name not in selected_containers]
+                
+                if not available_containers:
+                    break
+                    
+                rows = []
+                for c in available_containers:
+                    status = c.status.capitalize()
+                    image_tag = c.image.tags[0] if c.image.tags else c.attrs['Config']['Image']
+                    # Simplify image tag display
+                    if "/" in image_tag:
+                         image_tag = image_tag.split("/")[-1]
+                         
+                    config_str = "Standard"
+                    if c.attrs.get("HostConfig", {}).get("Privileged"):
+                        config_str = "Privileged 💥"
+                        
+                    rows.append([c.name, status, image_tag, config_str])
+                
+                print("\n👽 Available containers")
+                self.formatter.print_table(["NAME", "STATUS", "IMAGE", "CONFIG"], rows)
+                
+                default_choice = available_containers[0].name
+                try:
+                    choice = Prompt.ask(
+                        f"[?] Select a container by its name", 
+                        choices=[c.name for c in available_containers],
+                        default=default_choice
+                    )
+                    selected_containers.append(choice)
+                    
+                    if not [c for c in available_containers if c.name != choice]:
+                         # No more containers left to select
+                         break
+                         
+                    more = Prompt.ask("[?] Do you want to select another container?", choices=["y", "n"], default="n")
+                    if more.lower() != 'y':
+                        break
+                        
+                except (KeyboardInterrupt, EOFError):
+                    print("\nAborted.")
+                    return 0
+            
+            if not selected_containers:
+                 print("No container selected.")
+                 return 0
+                 
+            container_names = selected_containers
+
+        errors = 0
         for container_name in container_names:
             container = self.manager.get_container(container_name)
             if not container:
