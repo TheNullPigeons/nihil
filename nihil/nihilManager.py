@@ -5,6 +5,7 @@
 import docker
 from typing import Optional, Dict, List
 import sys
+from pathlib import Path
 from nihil.nihilFormatter import NihilFormatter
 from nihil.nihilError import (
     DockerUnavailable,
@@ -30,6 +31,7 @@ class NihilManager:
     }
     
     def __init__(self):
+        ensure_filesystem()
         try:
             self.client = docker.from_env()
             self.client.ping()
@@ -108,6 +110,16 @@ class NihilManager:
         
         if network_mode:
             container_config["network_mode"] = network_mode
+        
+        # Mount user resources if available
+        user_resources = Path.home() / ".nihil" / "my-resources"
+        if user_resources.exists():
+            if "volumes" not in container_config:
+                container_config["volumes"] = {}
+            container_config["volumes"][str(user_resources)] = {
+                "bind": "/opt/my-resources",
+                "mode": "rw"
+            }
         
         try:
             container = self.client.containers.create(**container_config)
@@ -227,5 +239,15 @@ class NihilManager:
                     )
             elif e.response.status_code == 404:
                 raise ImageRemoveFailed(image=image, message=f"Image '{image}' not found.")
-            else:
-                raise ImageRemoveFailed(image=image, message=f"Error removing image: {e}")
+    
+def ensure_filesystem():
+    """Ensure critical user directories and files exist"""
+    # Create default directory structure for user resources
+    # ~/.nihil/my-resources/setup/zsh
+    resource_path = Path.home() / ".nihil" / "my-resources" / "setup" / "zsh"
+    resource_path.mkdir(parents=True, exist_ok=True)
+    
+    # Create empty zshrc if it doesn 't exist
+    zshrc_path = resource_path / "zshrc"
+    if not zshrc_path.exists():
+        zshrc_path.write_text("# Put your custom zsh configuration here\n# It will be sourced automatically in your Nihil containers\n")
