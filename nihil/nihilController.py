@@ -5,7 +5,7 @@
 import sys
 from typing import Optional, List
 
-from nihil.nihilManager import NihilManager
+from nihil.nihilManager import NihilManager, ensure_filesystem
 from nihil.nihilHelp import create_parser
 from nihil.nihilFormatter import NihilFormatter
 from nihil.nihilError import NihilError
@@ -19,6 +19,7 @@ class NihilController:
     """Orchestrates command execution"""
     
     def __init__(self):
+        ensure_filesystem()
         self.parser = create_parser()
         self.manager = None
         self.formatter = NihilFormatter()
@@ -66,6 +67,8 @@ class NihilController:
             return self._cmd_remove(parsed_args)
         elif parsed_args.command == "exec":
             return self._cmd_exec(parsed_args)
+        elif parsed_args.command == "install":
+            return self._cmd_install(parsed_args)
         elif parsed_args.command == "uninstall":
             return self._cmd_uninstall(parsed_args)
         elif parsed_args.command == "completion":
@@ -290,13 +293,110 @@ class NihilController:
         command = " ".join(args.command) if args.command else "zsh"
         self.manager.exec_in_container(container, command)
         return 0
+
+    def _cmd_install(self, args) -> int:
+        """Install or update nihil images"""
+        image_arg = args.image
+        
+        if image_arg is None:
+            # Interactive selection
+            from rich.prompt import IntPrompt
+            from rich.console import Console
+            
+            console = Console()
+            print(self.formatter.info("Select an image to install/update:"))
+            
+            variants = [v for v in self.manager.AVAILABLE_IMAGES.keys() if v != "active-directory"]
+            rows = []
+            for i, variant in enumerate(variants):
+                rows.append([str(i+1), variant, self.manager.AVAILABLE_IMAGES[variant]])
+            
+            self.formatter.print_table(["#", "VARIANT", "IMAGE TAG"], rows)
+            
+            try:
+                choice = IntPrompt.ask(
+                    "Select number", 
+                    choices=[str(k) for k in range(1, len(variants) + 1)],
+                    default=1
+                )
+                image_arg = variants[choice - 1]
+            except (KeyboardInterrupt, EOFError):
+                print("\nAborted.")
+                return 0
+        
+        # Resolve full image tag
+        image_tag = self.manager.AVAILABLE_IMAGES.get(image_arg)
+        if not image_tag:
+            print(self.formatter.error(f"Unknown image variant: {image_arg}"))
+            return 1
+
+        print(self.formatter.info(f"Pulling image '{image_tag}'..."))
+        try:
+            # Force pull to update
+            self.manager.client.images.pull(image_tag)
+            print(self.formatter.success(f"Image '{image_tag}' installed/updated successfully."))
+            return 0
+        except Exception as e:
+            print(self.formatter.error(f"Failed to pull image: {e}"))
+            return 1
     
     def _cmd_uninstall(self, args) -> int:
         """Remove nihil images"""
-        images = args.names
-        if not images:
-            images = [self.manager.DEFAULT_IMAGE]
+        raw_images = args.names
+        resolved_images = []
         
+        if not raw_images:
+            # Interactive selection if no argument provided
+            images_list = self.manager.list_images()
+            if not images_list:
+                print("No installed nihil images found.")
+                return 0
+                
+            from rich.prompt import IntPrompt
+            
+            print(self.formatter.info("Select image(s) to uninstall:"))
+            
+            choices_map = []
+            rows = []
+            
+            for i, img in enumerate(images_list):
+                tags = ", ".join(img.tags) if img.tags else "<none>"
+                size = f"{img.attrs['Size'] / (1024**3):.2f} GB"
+                # Keep track of full image ID or tag for removal
+                image_ref = img.tags[0] if img.tags else img.id
+                choices_map.append(image_ref)
+                rows.append([str(i+1), tags, size])
+            
+            self.formatter.print_table(["#", "IMAGE", "SIZE"], rows)
+            
+            try:
+                choice = IntPrompt.ask(
+                    "Select an image number", 
+                    choices=[str(k) for k in range(1, len(images_list) + 1)],
+                    default=1
+                )
+                selected_image = choices_map[choice - 1]
+                resolved_images.append(selected_image)
+            except (KeyboardInterrupt, EOFError):
+                 print("\nAborted.")
+                 return 0
+                 
+        else:
+            for item in raw_images:
+                # 1. Check if it's a known available image key (base, ad, etc.)
+                if item in self.manager.AVAILABLE_IMAGES:
+                    resolved_images.append(self.manager.AVAILABLE_IMAGES[item])
+                # 2. Check for the display name "nihil-ad" or "nihil-ad:latest" (shown in nihil info)
+                elif item in ["nihil-ad", "nihil-ad:latest"]:
+                    resolved_images.append(self.manager.AVAILABLE_IMAGES.get("ad"))
+                # 3. Handle base image display name "nihil", "nihil:latest"
+                elif item in ["nihil", "nihil:latest"]:
+                    resolved_images.append(self.manager.AVAILABLE_IMAGES.get("base"))
+                # 4. Fallback to raw input
+                else:
+                    resolved_images.append(item)
+        
+        images = resolved_images
         containers_to_remove = []
         for image in images:
             try:
