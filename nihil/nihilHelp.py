@@ -104,6 +104,19 @@ Examples:
     remove_parser.add_argument("names", nargs="*", help="Container name(s)")
     remove_parser.add_argument("--force", "-f", action="store_true", help="Force removal")
     
+    # Command: install
+    install_parser = subparsers.add_parser(
+        "install",
+        help="Install or update nihil images"
+    )
+    install_parser.add_argument(
+        "image",
+        choices=["base", "ad", "active-directory", "web", "crypto"],
+        nargs="?",
+        default=None,
+        help="Image variant to install. If not specified, prompted to select."
+    )
+    
     # Command: uninstall
     uninstall_parser = subparsers.add_parser(
         "uninstall",
