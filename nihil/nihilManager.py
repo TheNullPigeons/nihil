@@ -28,6 +28,8 @@ class NihilManager:
         "base": "ghcr.io/thenullpigeons/nihil-images:latest",
         "ad": "ghcr.io/thenullpigeons/nihil-images-ad:latest",
         "active-directory": "ghcr.io/thenullpigeons/nihil-images-ad:latest",
+        "web": "ghcr.io/thenullpigeons/nihil-images-web:latest",
+        "pwn": "ghcr.io/thenullpigeons/nihil-images-pwn:latest",
     }
     
     def __init__(self):
