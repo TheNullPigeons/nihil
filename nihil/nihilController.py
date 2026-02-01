@@ -122,8 +122,8 @@ class NihilController:
                         desc = "Active Directory tools"
                     elif "web" in variant:
                         desc = "Web Hacking tools"
-                    elif "pwn" in variant or "crypto" in variant:
-                        desc = "Pwn & Crypto tools"
+                    elif "pwn" in variant:
+                        desc = "Pwn / exploitation binaire"
                     
                     rows.append([str(i+1), variant, desc])
                 
@@ -468,10 +468,16 @@ class NihilController:
         """List available image variants"""
         print(self.formatter.section_header("AVAILABLE IMAGE VARIANTS", "📦 "))
         rows = []
+        variant_descriptions = {
+            "base": "Base image (OS + core tools)",
+            "ad": "Active Directory tools (base + AD tools)",
+            "web": "Web / HTTP tools (base + web tools)",
+            "pwn": "Pwn / exploitation binaire (base + outils pwn)",
+        }
         for variant, image_url in self.manager.AVAILABLE_IMAGES.items():
             if variant == "active-directory":
                 continue
-            description = "Base image (OS + core tools)" if variant == "base" else "Active Directory tools (base + AD tools)"
+            description = variant_descriptions.get(variant, "Specialized image")
             rows.append([variant, image_url, description])
         
         self.formatter.print_table(["VARIANT", "IMAGE", "DESCRIPTION"], rows)
@@ -483,12 +489,18 @@ class NihilController:
         """Display information about images and containers"""
         print(self.formatter.info(f"Nihil version {__version__}\n"))
         
+        variant_descriptions = {
+            "base": "Base image (OS + core tools)",
+            "ad": "Active Directory tools (base + AD tools)",
+            "web": "Web / HTTP tools (base + web tools)",
+            "pwn": "Pwn / exploitation binaire (base + outils pwn)",
+        }
         print(self.formatter.section_header("AVAILABLE IMAGE VARIANTS", "📦 "))
         rows = []
         for variant, image_url in self.manager.AVAILABLE_IMAGES.items():
             if variant == "active-directory":
                 continue
-            description = "Base image (OS + core tools)" if variant == "base" else "Active Directory tools (base + AD tools)"
+            description = variant_descriptions.get(variant, "Specialized image")
             rows.append([variant, image_url, description])
         
         self.formatter.print_table(["VARIANT", "IMAGE", "DESCRIPTION"], rows)
