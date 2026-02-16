@@ -40,7 +40,7 @@ class TestNihilError:
         
         assert error.exit_code == 2
         assert "Docker" in error.message
-        assert error.hint is not None  # Hint par défaut
+        assert error.hint is not None
     
     def test_docker_unavailable_custom_hint(self):
         """Test DockerUnavailable avec hint personnalisé"""

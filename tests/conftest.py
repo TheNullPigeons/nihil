@@ -11,13 +11,10 @@ from pathlib import Path
 def mock_docker_client():
     """Mock Docker client for testing"""
     client = MagicMock()
-    # Mock ping() to simulate successful connection
     client.ping.return_value = True
     
-    # Mock images API
     client.images = MagicMock()
     
-    # Mock containers API
     client.containers = MagicMock()
     
     return client
@@ -41,7 +38,6 @@ def temp_history_path(tmp_path, monkeypatch):
     history_file = tmp_path / "history.log"
     history_file.parent.mkdir(parents=True, exist_ok=True)
     
-    # Monkeypatch the HISTORY_PATH in nihilHistory module
     from nihil.nihilHistory import HISTORY_PATH
     monkeypatch.setattr("nihil.nihilHistory.HISTORY_PATH", history_file)
     
