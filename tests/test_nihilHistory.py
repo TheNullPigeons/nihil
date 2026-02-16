@@ -34,7 +34,6 @@ class TestNihilHistory:
     
     def test_log_command_handles_errors_silently(self, tmp_path, monkeypatch):
         """Test log_command gère les erreurs silencieusement"""
-        # Simuler un fichier non accessible
         history_file = tmp_path / "history.log"
         history_file.parent.mkdir(parents=True, exist_ok=True)
         history_file.write_text("existing")
@@ -42,13 +41,11 @@ class TestNihilHistory:
         
         monkeypatch.setattr("nihil.nihilHistory.HISTORY_PATH", history_file)
         
-        # Ne doit pas lever d'exception
         try:
             log_command(["test"], exit_code=0)
         except Exception:
             pytest.fail("log_command should handle errors silently")
         
-        # Restaurer les permissions pour le cleanup
         history_file.chmod(0o644)
     
     def test_log_command_format(self, temp_history_path):

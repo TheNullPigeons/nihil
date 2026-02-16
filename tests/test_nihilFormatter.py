@@ -37,7 +37,7 @@ class TestNihilFormatter:
         text_with_ansi = "\033[1;31mHello\033[0m"
         length = formatter._real_len(text_with_ansi)
         
-        assert length == 5  # "Hello" fait 5 caractères
+        assert length == 5
     
     def test_success_with_colors(self):
         """Test success() avec couleurs activées"""
