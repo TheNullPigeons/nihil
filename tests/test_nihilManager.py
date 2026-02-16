@@ -52,14 +52,12 @@ class TestNihilManager:
     
     def test_ensure_image_exists_pull_success(self, mock_docker_client, mock_formatter):
         """Test ensure_image_exists quand il faut pull l'image"""
-        # Image pas trouvée localement
         mock_docker_client.images.get.side_effect = docker.errors.ImageNotFound("Not found")
-        # Pull réussit
         mock_docker_client.images.pull.return_value = MagicMock()
         
         with patch('nihil.nihilManager.docker.from_env', return_value=mock_docker_client):
             with patch('nihil.nihilManager.ensure_filesystem'):
-                with patch('builtins.print'):  # Mock print pour éviter les sorties
+                with patch('builtins.print'):
                     manager = NihilManager()
                     result = manager.ensure_image_exists("test-image:latest")
                     
@@ -84,14 +82,13 @@ class TestNihilManager:
         """Test création de container avec valeurs par défaut"""
         mock_container = MagicMock()
         mock_docker_client.containers.create.return_value = mock_container
-        mock_docker_client.images.get.return_value = MagicMock()  # Image exists
+        mock_docker_client.images.get.return_value = MagicMock()
         
         with patch('nihil.nihilManager.docker.from_env', return_value=mock_docker_client):
             with patch('nihil.nihilManager.ensure_filesystem'):
                 manager = NihilManager()
                 container = manager.create_container("test-container")
                 
-                # Vérifier que create a été appelé avec la bonne config
                 call_args = mock_docker_client.containers.create.call_args
                 assert call_args is not None
                 config = call_args.kwargs
@@ -181,7 +178,6 @@ class TestNihilManager:
                 manager = NihilManager()
                 containers = manager.list_containers()
                 
-                # Doit retourner uniquement le conteneur nihil
                 assert len(containers) == 1
                 assert containers[0] == nihil_container
     
