@@ -332,13 +332,14 @@ class NihilController:
 
         print(self.formatter.info(f"Pulling image '{image_tag}'..."))
         try:
-            # Force pull to update
-            self.manager.client.images.pull(image_tag)
+            # Force pull to update, with progress display
+            self.manager._pull_with_progress(image_tag)
             print(self.formatter.success(f"Image '{image_tag}' installed/updated successfully."))
             return 0
         except Exception as e:
             print(self.formatter.error(f"Failed to pull image: {e}"))
             return 1
+
     
     def _cmd_uninstall(self, args) -> int:
         """Remove nihil images"""
@@ -360,12 +361,12 @@ class NihilController:
             rows = []
             
             for i, img in enumerate(images_list):
-                tags = ", ".join(img.tags) if img.tags else "<none>"
+                tags_raw = img.tags if img.tags else []
+                short = ", ".join(self.manager.short_image_name(t) for t in tags_raw) or img.short_id
                 size = f"{img.attrs['Size'] / (1024**3):.2f} GB"
-                # Keep track of full image ID or tag for removal
                 image_ref = img.tags[0] if img.tags else img.id
                 choices_map.append(image_ref)
-                rows.append([str(i+1), tags, size])
+                rows.append([str(i+1), short, size])
             
             self.formatter.print_table(["#", "IMAGE", "SIZE"], rows)
             
@@ -478,7 +479,7 @@ class NihilController:
             if variant == "active-directory":
                 continue
             description = variant_descriptions.get(variant, "Specialized image")
-            rows.append([variant, image_url, description])
+            rows.append([variant, self.manager.short_image_name(image_url), description])
         
         self.formatter.print_table(["VARIANT", "IMAGE", "DESCRIPTION"], rows)
         print()
@@ -501,7 +502,7 @@ class NihilController:
             if variant == "active-directory":
                 continue
             description = variant_descriptions.get(variant, "Specialized image")
-            rows.append([variant, image_url, description])
+            rows.append([variant, self.manager.short_image_name(image_url), description])
         
         self.formatter.print_table(["VARIANT", "IMAGE", "DESCRIPTION"], rows)
         print()
@@ -513,9 +514,11 @@ class NihilController:
         if images:
             rows = []
             for img in images:
-                tags = ", ".join(img.tags) if img.tags else "<none>"
+                tags = img.tags if img.tags else []
+                # Show compact name for each tag, fallback to image short id
+                short = ", ".join(self.manager.short_image_name(t) for t in tags) or img.short_id
                 size = f"{img.attrs['Size'] / (1024**3):.2f} GB"
-                rows.append([tags, size])
+                rows.append([short, size])
             
             self.formatter.print_table(["IMAGE", "SIZE"], rows, [50, 12])
         else:

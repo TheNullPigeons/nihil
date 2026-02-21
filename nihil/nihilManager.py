@@ -23,7 +23,7 @@ class NihilManager:
     
     DEFAULT_IMAGE = "ghcr.io/thenullpigeons/nihil-images:latest"
     
-    # Images disponibles
+    # Available images (variant -> full registry tag)
     AVAILABLE_IMAGES = {
         "base": "ghcr.io/thenullpigeons/nihil-images:latest",
         "ad": "ghcr.io/thenullpigeons/nihil-images-ad:latest",
@@ -31,7 +31,29 @@ class NihilManager:
         "web": "ghcr.io/thenullpigeons/nihil-images-web:latest",
         "pwn": "ghcr.io/thenullpigeons/nihil-images-pwn:latest",
     }
-    
+
+    # Reverse map: full registry tag -> compact display name
+    SHORT_NAMES: dict = {
+        "ghcr.io/thenullpigeons/nihil-images:latest":      "nihil",
+        "ghcr.io/thenullpigeons/nihil-images-ad:latest":   "nihil-ad",
+        "ghcr.io/thenullpigeons/nihil-images-web:latest":  "nihil-web",
+        "ghcr.io/thenullpigeons/nihil-images-pwn:latest":  "nihil-pwn",
+    }
+
+    @classmethod
+    def short_image_name(cls, full_tag: str) -> str:
+        """Return a compact display name for a full registry image tag.
+
+        Examples:
+            'ghcr.io/thenullpigeons/nihil-images-web:latest' -> 'nihil-web'
+            'unknown/my-image:v1'                            -> 'my-image:v1'
+        """
+        if full_tag in cls.SHORT_NAMES:
+            return cls.SHORT_NAMES[full_tag]
+        # Fallback: strip registry host + org prefix, replace 'nihil-images' -> 'nihil'
+        name = full_tag.split("/")[-1] if "/" in full_tag else full_tag
+        return name.replace("nihil-images", "nihil", 1)
+
     def __init__(self):
         ensure_filesystem()
         try:
@@ -45,7 +67,7 @@ class NihilManager:
         """Ensure the image exists, pull from ghcr.io if not found"""
         if image is None:
             image = self.DEFAULT_IMAGE
-        
+
         try:
             self.client.images.get(image)
             return True
@@ -53,12 +75,96 @@ class NihilManager:
             print(self.formatter.info(f"Image '{image}' not found locally."))
             print(self.formatter.info(f"Pulling '{image}' from registry..."))
             try:
-                self.client.images.pull(image)
+                self._pull_with_progress(image)
                 print(self.formatter.success(f"Image '{image}' pulled successfully."))
                 return True
             except docker.errors.APIError as e:
-                raise ImagePullFailed(image=image, message=f"Échec du pull de l'image '{image}': {e}")
-    
+                raise ImagePullFailed(image=image, message=f"Failed to pull image '{image}': {e}")
+
+    def _pull_with_progress(self, image: str) -> None:
+        """Pull a Docker image and display per-layer download progress."""
+        from rich.progress import (
+            Progress,
+            BarColumn,
+            DownloadColumn,
+            TransferSpeedColumn,
+            TimeRemainingColumn,
+            TextColumn,
+        )
+        from rich.console import Console
+
+        console = Console()
+
+        # layer_id -> rich task id
+        tasks: dict = {}
+        # layer_id -> total bytes (filled when progressDetail arrives)
+        totals: dict = {}
+
+        with Progress(
+            TextColumn("[bold cyan]{task.fields[layer]:<14}[/]"),
+            TextColumn("[bold white]{task.fields[status]:<20}[/]"),
+            BarColumn(bar_width=30),
+            DownloadColumn(),
+            TransferSpeedColumn(),
+            TimeRemainingColumn(),
+            console=console,
+            transient=False,
+        ) as progress:
+            for event in self.client.api.pull(image, stream=True, decode=True):
+                layer_id = event.get("id", "")
+                status   = event.get("status", "")
+                detail   = event.get("progressDetail") or {}
+                current  = detail.get("current", 0)
+                total    = detail.get("total", 0)
+
+                # Skip events without a meaningful layer id
+                if not layer_id:
+                    if status:
+                        console.print(f"[dim]{status}[/]")
+                    continue
+
+                # Create a progress task the first time we see this layer
+                if layer_id not in tasks:
+                    task_id = progress.add_task(
+                        "",
+                        layer=layer_id,
+                        status=status,
+                        total=total or 0,
+                        completed=0,
+                    )
+                    tasks[layer_id] = task_id
+                    totals[layer_id] = total
+
+                task_id = tasks[layer_id]
+
+                # Update total if we now know it
+                if total and totals[layer_id] != total:
+                    progress.update(task_id, total=total)
+                    totals[layer_id] = total
+
+                # Update status label and progress
+                progress.update(
+                    task_id,
+                    status=status,
+                    completed=current if current else (totals[layer_id] if status in ("Pull complete", "Already exists") else None),
+                )
+
+        # Print a summary note explaining compressed vs on-disk size
+        total_compressed = sum(totals.values())
+
+        def _fmt_bytes(n: int) -> str:
+            for unit in ("B", "KB", "MB", "GB"):
+                if n < 1024:
+                    return f"{n:.1f} {unit}"
+                n /= 1024
+            return f"{n:.1f} TB"
+
+        console.print(
+            f"\n[dim]ℹ  Downloaded [bold]{_fmt_bytes(total_compressed)}[/] (compressed). "
+            f"The on-disk size will be larger once layers are extracted.[/]"
+        )
+
+
     def container_exists(self, name: str) -> bool:
         """Check if a container exists"""
         try:
