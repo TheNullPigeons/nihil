@@ -149,22 +149,6 @@ class NihilManager:
                     completed=current if current else (totals[layer_id] if status in ("Pull complete", "Already exists") else None),
                 )
 
-        # Print a summary note explaining compressed vs on-disk size
-        total_compressed = sum(totals.values())
-
-        def _fmt_bytes(n: int) -> str:
-            for unit in ("B", "KB", "MB", "GB"):
-                if n < 1024:
-                    return f"{n:.1f} {unit}"
-                n /= 1024
-            return f"{n:.1f} TB"
-
-        console.print(
-            f"\n[dim]ℹ  Downloaded [bold]{_fmt_bytes(total_compressed)}[/] (compressed). "
-            f"The on-disk size will be larger once layers are extracted.[/]"
-        )
-
-
     def container_exists(self, name: str) -> bool:
         """Check if a container exists"""
         try:
@@ -350,12 +334,48 @@ class NihilManager:
     
 def ensure_filesystem():
     """Ensure critical user directories and files exist"""
-    # Create default directory structure for user resources
-    # ~/.nihil/my-resources/setup/zsh
-    resource_path = Path.home() / ".nihil" / "my-resources" / "setup" / "zsh"
-    resource_path.mkdir(parents=True, exist_ok=True)
-    
-    # Create empty zshrc if it doesn 't exist
-    zshrc_path = resource_path / "zshrc"
+    base = Path.home() / ".nihil" / "my-resources" / "setup"
+
+    # --- zsh ---
+    zsh_path = base / "zsh"
+    zsh_path.mkdir(parents=True, exist_ok=True)
+    zshrc_path = zsh_path / "zshrc"
     if not zshrc_path.exists():
-        zshrc_path.write_text("# Put your custom zsh configuration here\n# It will be sourced automatically in your Nihil containers\n")
+        zshrc_path.write_text(
+            "# Ajoutez ici votre configuration zsh personnalisée\n"
+            "# Elle sera chargée automatiquement dans vos containers Nihil\n"
+        )
+    aliases_path = zsh_path / "aliases"
+    if not aliases_path.exists():
+        aliases_path.write_text(
+            "# Ajoutez ici vos alias personnalisés\n"
+            "# Exemple : alias ll='ls -lah'\n"
+        )
+    history_path = zsh_path / "history"
+    if not history_path.exists():
+        history_path.write_text(
+            "# Ajoutez ici vos commandes à pré-charger dans l'historique zsh\n"
+        )
+
+    # --- nvim ---
+    nvim_path = base / "nvim"
+    nvim_path.mkdir(parents=True, exist_ok=True)
+    init_vim = nvim_path / "init.vim"
+    if not init_vim.exists():
+        init_vim.write_text(
+            "\" Ajoutez ici votre configuration Neovim personnalisée\n"
+            "\" Elle sera copiée dans ~/.config/nvim/ à l'intérieur du container\n"
+        )
+
+    # --- tmux ---
+    tmux_path = base / "tmux"
+    tmux_path.mkdir(parents=True, exist_ok=True)
+    tmux_conf = tmux_path / "tmux.conf"
+    if not tmux_conf.exists():
+        tmux_conf.write_text(
+            "# Ajoutez ici votre configuration tmux personnalisée\n"
+            "# Elle sera fusionnée dans ~/.tmux.conf à l'intérieur du container\n"
+            "# Exemple :\n"
+            "# set -g mouse on\n"
+        )
+
