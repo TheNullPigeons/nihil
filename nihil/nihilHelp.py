@@ -81,7 +81,7 @@ Examples:
     )
     start_parser.add_argument(
         "--image",
-        choices=["base", "ad", "active-directory", "web", "pwn"],
+        choices=["base", "ad", "active-directory", "web"],
         default=None,
         help="Image variant to use. If not specified, you will be prompted to select one."
     )
@@ -111,7 +111,7 @@ Examples:
     )
     install_parser.add_argument(
         "image",
-        choices=["base", "ad", "active-directory", "web", "pwn"],
+        choices=["base", "ad", "active-directory", "web"],
         nargs="?",
         default=None,
         help="Image variant to install. If not specified, prompted to select."

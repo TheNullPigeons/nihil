@@ -91,6 +91,7 @@ class NihilController:
                 print(self.formatter.info(f"Starting container '{container_name}'..."))
                 self.manager.start_container(container)
                 print(self.formatter.success(f"Container '{container_name}' started successfully."))
+            self._print_container_info(container, args, created=False)
         else:
             print(self.formatter.info(f"Container '{container_name}' doesn't exist. Creating..."))
             network_map = {
@@ -112,7 +113,7 @@ class NihilController:
                 
                 variants = [v for v in self.manager.AVAILABLE_IMAGES.keys() if v != "active-directory"]
                 # Ensure specific order if desired, or sort it
-                # variants.sort() 
+                # variants.sort()
                 
                 rows = []
                 for i, variant in enumerate(variants):
@@ -122,12 +123,22 @@ class NihilController:
                         desc = "Active Directory tools"
                     elif "web" in variant:
                         desc = "Web Hacking tools"
-                    elif "pwn" in variant:
-                        desc = "Pwn / exploitation binaire"
                     
-                    rows.append([str(i+1), variant, desc])
+                    image_tag = self.manager.AVAILABLE_IMAGES[variant]
+                    info = self.manager.get_image_info(image_tag)
+                    if info:
+                        size_gb = info["size_bytes"] / (1024 ** 3)
+                        size_str = f"{size_gb:.2f} GB"
+                        installed = "Yes"
+                    else:
+                        size_str = "-"
+                        installed = "No"
+                    
+                    rows.append([str(i + 1), variant, desc, size_str, installed])
                 
-                self.formatter.print_table(["#", "VARIANT", "DESCRIPTION"], rows)
+                self.formatter.print_table(
+                    ["#", "VARIANT", "DESCRIPTION", "SIZE", "INSTALLED"], rows
+                )
                 
                 choices_indices = list(range(1, len(variants) + 1))
                 try:
@@ -155,6 +166,7 @@ class NihilController:
             print(self.formatter.info(f"Starting container '{container_name}'..."))
             self.manager.start_container(container)
             print(self.formatter.success(f"Container '{container_name}' created and started successfully."))
+            self._print_container_info(container, args, created=True)
         
         if not args.no_shell:
             command = "zsh"
@@ -171,7 +183,58 @@ class NihilController:
             self.manager.exec_in_container(container, command)
         
         return 0
-    
+
+    def _print_container_info(self, container, args, created: bool = False) -> None:
+        """Print container summary (name, image, network, privileged, workspace) like Exegol."""
+        try:
+            from rich.console import Console
+            from rich.panel import Panel
+            from rich.table import Table
+        except ImportError:
+            return
+        name = container.name
+        image_tag = container.image.tags[0] if container.image.tags else container.attrs.get("Config", {}).get("Image", "?")
+        short_image = self.manager.short_image_name(image_tag)
+        cid = container.short_id
+        attrs = container.attrs
+        host_config = attrs.get("HostConfig") or {}
+        network_mode = host_config.get("NetworkMode") or "host"
+        privileged = host_config.get("Privileged") or False
+        mounts = attrs.get("Mounts") or []
+        workspace_mount = None
+        for m in mounts:
+            if m.get("Destination") == "/workspace":
+                workspace_mount = m.get("Source")
+                break
+        # Build colored displays
+        if network_mode == "host":
+            network_display = "[yellow]host[/] (shares host network)"
+        elif network_mode in ("bridge", "docker"):
+            network_display = "[cyan]bridge[/]"
+        elif network_mode in ("none", "disabled"):
+            network_display = "[magenta]none[/]"
+        else:
+            network_display = network_mode
+
+        priv_display = "[red]Yes[/]" if privileged else "[green]No[/]"
+
+        if workspace_mount:
+            workspace_display = f"[green]{workspace_mount}[/] → [cyan]/workspace[/]"
+        else:
+            workspace_display = "[cyan]/workspace[/] (default, no host mount)"
+
+        table = Table(show_header=False, box=None, padding=(0, 2))
+        table.add_column(style="bold cyan")
+        table.add_column(style="white")
+        table.add_row("Name", name)
+        table.add_row("Image", short_image)
+        table.add_row("Container ID", cid)
+        table.add_row("Network", network_display)
+        table.add_row("Privileged", priv_display)
+        table.add_row("Workspace", workspace_display)
+        title = "New container" if created else "Container"
+        Console().print(Panel(table, title=f"[bold]{title}[/]", border_style="blue", padding=(0, 1)))
+
     def _cmd_stop(self, args) -> int:
         """Stop a container"""
         container_name = args.name
@@ -473,7 +536,6 @@ class NihilController:
             "base": "Base image (OS + core tools)",
             "ad": "Active Directory tools (base + AD tools)",
             "web": "Web / HTTP tools (base + web tools)",
-            "pwn": "Pwn / exploitation binaire (base + outils pwn)",
         }
         for variant, image_url in self.manager.AVAILABLE_IMAGES.items():
             if variant == "active-directory":
@@ -494,7 +556,6 @@ class NihilController:
             "base": "Base image (OS + core tools)",
             "ad": "Active Directory tools (base + AD tools)",
             "web": "Web / HTTP tools (base + web tools)",
-            "pwn": "Pwn / exploitation binaire (base + outils pwn)",
         }
         print(self.formatter.section_header("AVAILABLE IMAGE VARIANTS", "📦 "))
         rows = []
