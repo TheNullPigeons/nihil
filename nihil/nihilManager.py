@@ -29,7 +29,6 @@ class NihilManager:
         "ad": "ghcr.io/thenullpigeons/nihil-images-ad:latest",
         "active-directory": "ghcr.io/thenullpigeons/nihil-images-ad:latest",
         "web": "ghcr.io/thenullpigeons/nihil-images-web:latest",
-        "pwn": "ghcr.io/thenullpigeons/nihil-images-pwn:latest",
     }
 
     # Reverse map: full registry tag -> compact display name
@@ -37,7 +36,6 @@ class NihilManager:
         "ghcr.io/thenullpigeons/nihil-images:latest":      "nihil",
         "ghcr.io/thenullpigeons/nihil-images-ad:latest":   "nihil-ad",
         "ghcr.io/thenullpigeons/nihil-images-web:latest":  "nihil-web",
-        "ghcr.io/thenullpigeons/nihil-images-pwn:latest":  "nihil-pwn",
     }
 
     @classmethod
@@ -278,6 +276,18 @@ class NihilManager:
         except docker.errors.APIError as e:
             print(f"Error retrieving images: {e}", file=sys.stderr)
             return []
+
+    def get_image_info(self, image_tag: str) -> Optional[Dict]:
+        """
+        Return size (bytes) and presence for a given image tag.
+        Returns None if image is not found locally.
+        """
+        try:
+            img = self.client.images.get(image_tag)
+            size = img.attrs.get("Size", 0)
+            return {"size_bytes": size, "id": img.short_id}
+        except docker.errors.ImageNotFound:
+            return None
     
     def exec_in_container(self, container, command: str = "zsh"):
         """Execute a command in a container (interactive mode)"""
