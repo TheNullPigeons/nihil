@@ -31,29 +31,65 @@ class NihilDoctor:
         self.formatter = formatter or NihilFormatter()
 
     def run(self) -> int:
-        results: List[DoctorCheckResult] = []
         exit_code: Optional[int] = None
 
         print(self.formatter.section_header("Nihil doctor", "🩺"))
-        results.extend(self._check_runtime())
-
-        # Docker checks (may fail hard)
+        # Collect results
+        env_results = self._check_runtime()
+        docker_results: List[DoctorCheckResult] = []
         try:
             manager = NihilManager()
-            results.append(DoctorCheckResult("Docker daemon accessible", True))
-            results.extend(self._check_image(manager))
+            docker_results.append(DoctorCheckResult("Docker daemon accessible", True))
+            docker_results.extend(self._check_image(manager))
         except NihilError as e:
-            results.append(DoctorCheckResult("Docker daemon accessible", False, str(e)))
+            docker_results.append(DoctorCheckResult("Docker daemon accessible", False, str(e)))
             exit_code = e.exit_code
 
-        # Render summary + decide exit code
-        print(self.formatter.section_header("Résultats", "✅"))
-        for r in results:
-            prefix = self.formatter.success(r.name) if r.ok else self.formatter.error(r.name)
-            if r.details and not r.ok:
-                print(f"{prefix}\n  {r.details}")
-            else:
-                print(prefix)
+        # Pretty rendering with Rich tables when available
+        try:
+            from rich.console import Console
+            from rich.table import Table
+            from rich.panel import Panel
+
+            console = Console()
+
+            # Environment table
+            env_table = Table(show_header=True, header_style="bold cyan")
+            env_table.add_column("Check", style="bold")
+            env_table.add_column("Status", style="bold")
+            env_table.add_column("Details")
+            for r in env_results:
+                status = "[green]OK[/]" if r.ok else "[red]FAIL[/]"
+                env_table.add_row(r.name, status, r.details or "")
+            console.print(Panel(env_table, title="[bold]Environment[/] 🌍", border_style="cyan", padding=(0, 1)))
+
+            # Docker table
+            docker_table = Table(show_header=True, header_style="bold magenta")
+            docker_table.add_column("Check", style="bold")
+            docker_table.add_column("Status", style="bold")
+            docker_table.add_column("Details")
+            for r in docker_results:
+                status = "[green]OK[/]" if r.ok else "[red]FAIL[/]"
+                docker_table.add_row(r.name, status, r.details or "")
+            console.print(Panel(docker_table, title="[bold]Docker[/] 🐋", border_style="magenta", padding=(0, 1)))
+        except ImportError:
+            # Fallback plain text rendering
+            print(self.formatter.section_header("Environment", "🌍"))
+            for r in env_results:
+                prefix = self.formatter.success(r.name) if r.ok else self.formatter.error(r.name)
+                if r.details:
+                    print(f"{prefix}\n  {r.details}")
+                else:
+                    print(prefix)
+
+            print()
+            print(self.formatter.section_header("Docker", "🐋"))
+            for r in docker_results:
+                prefix = self.formatter.success(r.name) if r.ok else self.formatter.error(r.name)
+                if r.details:
+                    print(f"{prefix}\n  {r.details}")
+                else:
+                    print(prefix)
 
         # If a critical NihilError happened, keep its exit code (useful for scripting).
         if exit_code is not None:
@@ -65,47 +101,42 @@ class NihilDoctor:
     def _check_runtime(self) -> List[DoctorCheckResult]:
         py = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
         return [
-            DoctorCheckResult("Python >= 3.12", sys.version_info >= (3, 12), f"Python détecté: {py}"),
+            DoctorCheckResult("Python >= 3.12", sys.version_info >= (3, 12), f"Detected Python: {py}"),
             DoctorCheckResult(
-                "OS détecté",
+                "Detected OS",
                 True,
                 f"{platform.system()} {platform.release()} ({platform.machine()})",
             ),
-            DoctorCheckResult("Docker SDK présent", True, f"docker=={getattr(docker, '__version__', '?')}"),
+            DoctorCheckResult("Docker SDK present", True, f"docker=={getattr(docker, '__version__', '?')}"),
             DoctorCheckResult(
                 "DOCKER_HOST",
                 True,
-                os.environ.get("DOCKER_HOST", "<non défini>"),
+                os.environ.get("DOCKER_HOST", "<not set>"),
             ),
         ]
 
     def _check_image(self, manager: NihilManager) -> List[DoctorCheckResult]:
-        image = manager.DEFAULT_IMAGE
         out: List[DoctorCheckResult] = []
 
-        # Check local presence; if missing, try pulling (non-interactive).
-        try:
-            manager.client.images.get(image)
-            out.append(DoctorCheckResult(f"Image par défaut disponible ({image})", True))
-            return out
-        except docker.errors.ImageNotFound:
-            # Not a failure by itself: we'll try pulling.
-            pass
-        except docker.errors.DockerException as e:
-            out.append(DoctorCheckResult(f"Inspection image ({image})", False, str(e)))
-            return out
+        # Check local presence only; doctor must never pull automatically.
+        # Report status grouped by *unique* images, with a human-friendly label.
+        unique_images: dict[str, str] = {}
+        for label, image in manager.AVAILABLE_IMAGES.items():
+            # Map base tag to 'base' (not 'default') for display.
+            if image == manager.DEFAULT_IMAGE and "base" in manager.AVAILABLE_IMAGES:
+                display = f"Image 'base' ({image})"
+            else:
+                display = f"Image '{label}' ({image})"
+            unique_images[image] = display
 
-        try:
-            manager.ensure_image_exists(image)
-            out.append(
-                DoctorCheckResult(
-                    f"Image par défaut disponible ({image})",
-                    True,
-                    "Image absente localement → pull OK",
-                )
-            )
-        except (ImagePullFailed, DockerUnavailable) as e:
-            out.append(DoctorCheckResult(f"Image par défaut disponible ({image})", False, str(e)))
+        for image, display_name in unique_images.items():
+            try:
+                manager.client.images.get(image)
+                out.append(DoctorCheckResult(display_name, True, "Present locally"))
+            except docker.errors.ImageNotFound:
+                out.append(DoctorCheckResult(display_name, True, "Not present locally"))
+            except docker.errors.DockerException as e:
+                out.append(DoctorCheckResult(display_name, False, str(e)))
 
         return out
 
