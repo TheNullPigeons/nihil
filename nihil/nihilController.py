@@ -157,14 +157,15 @@ class NihilController:
             image = self.manager.AVAILABLE_IMAGES.get(image_arg, self.manager.DEFAULT_IMAGE)
             print(self.formatter.info(f"Using image variant: {image_arg} ({image})"))
             
+            vpn_path = getattr(args, "vpn", None)
             container = self.manager.create_container(
                 name=container_name,
                 image=image,
                 privileged=args.privileged,
                 network_mode=network_map.get(args.network, "host"),
                 workspace=args.workspace,
-                vpn=getattr(args, "vpn", False),
-                vpn_config_path=getattr(args, "vpn_config", None),
+                vpn=bool(vpn_path),
+                vpn_config_path=vpn_path,
             )
             print(self.formatter.info(f"Container '{container_name}' created."))
             print(self.formatter.info(f"Starting container '{container_name}'..."))
@@ -180,14 +181,15 @@ class NihilController:
                 if not self.manager.container_has_tun(container):
                     print(self.formatter.error(
                         "This container has no VPN support (/dev/net/tun missing). "
-                        "To use VPN, create a new container with --vpn, e.g.: nihil destroy demo && nihil start demo --vpn ~/vpn/file.ovpn"
+                        "To use VPN, create a new container with --vpn, e.g.: nihil remove demo && nihil start demo --vpn ~/vpn/file.ovpn"
                     ))
                 else:
                     vpn_file = Path(vpn_path).expanduser().resolve()
                     if vpn_file.is_file():
                         if self.manager.copy_file_into_container(container, str(vpn_file), "/tmp/nihil_vpn.ovpn"):
                             print(self.formatter.info("VPN config copied into container; VPN will start for this session and stop when you exit."))
-                            command = "sh -c 'openvpn --config /tmp/nihil_vpn.ovpn --daemon --log /tmp/nihil_openvpn.log 2>>/tmp/nihil_openvpn.log; sleep 2; zsh; killall openvpn 2>/dev/null; exit 0'"
+                            # Run OpenVPN quietly for this session only; all output goes to /dev/null
+                            command = "sh -c 'openvpn --config /tmp/nihil_vpn.ovpn --daemon >/dev/null 2>&1; sleep 2; zsh; killall openvpn >/dev/null 2>&1; exit 0'"
                         else:
                             print(self.formatter.warning("Could not copy VPN config into container. Start OpenVPN manually if needed."))
                     else:
@@ -223,6 +225,12 @@ class NihilController:
         network_mode = host_config.get("NetworkMode") or "host"
         privileged = host_config.get("Privileged") or False
         mounts = attrs.get("Mounts") or []
+        env_list = attrs.get("Config", {}).get("Env") or []
+        env = {}
+        for kv in env_list:
+            if "=" in kv:
+                k, v = kv.split("=", 1)
+                env[k] = v
         workspace_mount = None
         for m in mounts:
             if m.get("Destination") == "/workspace":
@@ -245,6 +253,22 @@ class NihilController:
         else:
             workspace_display = "[cyan]/workspace[/] (default, no host mount)"
 
+        # VPN display: created containers with NIHIL_VPN=1 vs session-only VPN on existing containers.
+        # For existing containers started with --vpn but without /dev/net/tun, show as disabled.
+        vpn_flag = env.get("NIHIL_VPN") == "1"
+        requested_session_vpn = bool(getattr(args, "vpn", None)) and not created
+        has_tun = False
+        try:
+            has_tun = self.manager.container_has_tun(container)
+        except Exception:
+            has_tun = False
+        if vpn_flag:
+            vpn_display = "[green]Enabled[/] (NIHIL_VPN=1)"
+        elif requested_session_vpn and has_tun:
+            vpn_display = "[yellow]Session only[/] (config copied inside)"
+        else:
+            vpn_display = "[red]Disabled[/]"
+
         table = Table(show_header=False, box=None, padding=(0, 2))
         table.add_column(style="bold cyan")
         table.add_column(style="white")
@@ -254,6 +278,7 @@ class NihilController:
         table.add_row("Network", network_display)
         table.add_row("Privileged", priv_display)
         table.add_row("Workspace", workspace_display)
+        table.add_row("VPN", vpn_display)
         title = "New container" if created else "Container"
         Console().print(Panel(table, title=f"[bold]{title}[/]", border_style="blue", padding=(0, 1)))
 
