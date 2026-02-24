@@ -3,6 +3,7 @@
 """Nihil Controller - Orchestrates command execution"""
 
 import sys
+from pathlib import Path
 from typing import Optional, List
 
 from nihil.nihilManager import NihilManager, ensure_filesystem
@@ -82,7 +83,8 @@ class NihilController:
         
         print(self.formatter.info(f"Looking for container '{container_name}'..."))
         container = self.manager.get_container(container_name)
-        
+        container_existed = container is not None
+
         if container:
             print(self.formatter.info(f"Container '{container_name}' found."))
             if container.status == "running":
@@ -160,7 +162,9 @@ class NihilController:
                 image=image,
                 privileged=args.privileged,
                 network_mode=network_map.get(args.network, "host"),
-                workspace=args.workspace
+                workspace=args.workspace,
+                vpn=getattr(args, "vpn", False),
+                vpn_config_path=getattr(args, "vpn_config", None),
             )
             print(self.formatter.info(f"Container '{container_name}' created."))
             print(self.formatter.info(f"Starting container '{container_name}'..."))
@@ -170,7 +174,25 @@ class NihilController:
         
         if not args.no_shell:
             command = "zsh"
-            if args.log:
+            # Existing container + --vpn: copy .ovpn into container and run VPN for this session only; VPN stops when shell exits
+            vpn_path = getattr(args, "vpn", None)
+            if container_existed and vpn_path:
+                if not self.manager.container_has_tun(container):
+                    print(self.formatter.error(
+                        "This container has no VPN support (/dev/net/tun missing). "
+                        "To use VPN, create a new container with --vpn, e.g.: nihil destroy demo && nihil start demo --vpn ~/vpn/file.ovpn"
+                    ))
+                else:
+                    vpn_file = Path(vpn_path).expanduser().resolve()
+                    if vpn_file.is_file():
+                        if self.manager.copy_file_into_container(container, str(vpn_file), "/tmp/nihil_vpn.ovpn"):
+                            print(self.formatter.info("VPN config copied into container; VPN will start for this session and stop when you exit."))
+                            command = "sh -c 'openvpn --config /tmp/nihil_vpn.ovpn --daemon --log /tmp/nihil_openvpn.log 2>>/tmp/nihil_openvpn.log; sleep 2; zsh; killall openvpn 2>/dev/null; exit 0'"
+                        else:
+                            print(self.formatter.warning("Could not copy VPN config into container. Start OpenVPN manually if needed."))
+                    else:
+                        print(self.formatter.warning(f"VPN file not found: {vpn_file}"))
+            if args.log and command == "zsh":
                 import datetime
                 timestamp = datetime.datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
                 logfile = f"/workspace/logs/{timestamp}_shell.asciinema"

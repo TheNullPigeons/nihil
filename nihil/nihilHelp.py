@@ -86,6 +86,12 @@ Examples:
         help="Image variant to use. If not specified, you will be prompted to select one."
     )
     start_parser.add_argument("--workspace", help="Workspace path to mount")
+    start_parser.add_argument(
+        "--vpn",
+        metavar="FILE",
+        default=None,
+        help="Path to OpenVPN config file (.ovpn). Starts the container with VPN; VPN stops when you exit the container.",
+    )
     start_parser.add_argument("--log", "-l", action="store_true", help="Enable shell logging (asciinema)")
     start_parser.add_argument("--no-shell", action="store_true", help="Don't open shell after starting")
     

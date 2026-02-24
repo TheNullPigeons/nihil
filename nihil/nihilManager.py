@@ -3,6 +3,8 @@
 """Docker Manager for Nihil - Handles Docker images and containers"""
 
 import docker
+import io
+import tarfile
 from typing import Optional, Dict, List
 import sys
 from pathlib import Path
@@ -169,7 +171,9 @@ class NihilManager:
         privileged: bool = False,
         volumes: Optional[Dict] = None,
         network_mode: Optional[str] = None,
-        workspace: Optional[str] = None
+        workspace: Optional[str] = None,
+        vpn: bool = False,
+        vpn_config_path: Optional[str] = None,
     ):
         """Create a new container"""
         if image is None:
@@ -201,6 +205,24 @@ class NihilManager:
         if network_mode:
             container_config["network_mode"] = network_mode
         
+        # VPN: mount .ovpn file and set env so entrypoint starts OpenVPN; when user exits shell, container stops and VPN stops
+        if vpn and vpn_config_path:
+            vpn_file = Path(vpn_config_path).expanduser().resolve()
+            if not vpn_file.is_file():
+                raise ContainerCreateFailed(
+                    name=name,
+                    message=f"VPN config is not a file or does not exist: {vpn_file}",
+                )
+            if "volumes" not in container_config:
+                container_config["volumes"] = {}
+            container_config["volumes"][str(vpn_file)] = {"bind": "/opt/nihil/vpn/client.ovpn", "mode": "ro"}
+            container_config["environment"] = container_config.get("environment") or {}
+            if isinstance(container_config["environment"], list):
+                container_config["environment"] = dict(
+                    kv.split("=", 1) for kv in container_config["environment"] if "=" in kv
+                )
+            container_config["environment"]["NIHIL_VPN"] = "1"
+        
         # Mount user resources if available
         user_resources = Path.home() / ".nihil" / "my-resources"
         if user_resources.exists():
@@ -210,6 +232,11 @@ class NihilManager:
                 "bind": "/opt/my-resources",
                 "mode": "rw"
             }
+        
+        # OpenVPN needs TUN/TAP + NET_ADMIN; pass as top-level kwargs (docker-py builds HostConfig from them)
+        if vpn and vpn_config_path:
+            container_config["cap_add"] = ["NET_ADMIN"]
+            container_config["devices"] = ["/dev/net/tun"]
         
         try:
             container = self.client.containers.create(**container_config)
@@ -289,6 +316,30 @@ class NihilManager:
         except docker.errors.ImageNotFound:
             return None
     
+    def container_has_tun(self, container) -> bool:
+        """Return True if the container has /dev/net/tun (required for OpenVPN)."""
+        try:
+            exit_code, _ = container.exec_run("test -c /dev/net/tun")
+            return exit_code == 0
+        except Exception:
+            return False
+
+    def copy_file_into_container(self, container, host_path: str, container_path: str) -> bool:
+        """Copy a single file from host into a running container. Returns True on success."""
+        try:
+            path = Path(host_path).expanduser().resolve()
+            if not path.is_file():
+                return False
+            buf = io.BytesIO()
+            with tarfile.open(fileobj=buf, mode="w") as tar:
+                tar.add(path, arcname=Path(container_path).name)
+            buf.seek(0)
+            parent = str(Path(container_path).parent)
+            container.put_archive(parent, buf.getvalue())
+            return True
+        except Exception:
+            return False
+
     def exec_in_container(self, container, command: str = "zsh"):
         """Execute a command in a container (interactive mode)"""
         import subprocess
