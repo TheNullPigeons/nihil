@@ -166,6 +166,7 @@ class NihilController:
                 workspace=args.workspace,
                 vpn=bool(vpn_path),
                 vpn_config_path=vpn_path,
+                enable_x11=getattr(args, "enable_x11", False),
             )
             print(self.formatter.info(f"Container '{container_name}' created."))
             print(self.formatter.info(f"Starting container '{container_name}'..."))
@@ -269,6 +270,20 @@ class NihilController:
         else:
             vpn_display = "[red]Disabled[/]"
 
+        # X11 display: show whether X11/XWayland integration is active.
+        has_x11_mount = any(m.get("Destination") == "/tmp/.X11-unix" for m in mounts)
+        display_env = env.get("DISPLAY")
+        x_mode = env.get("NIHIL_X_MODE", "unknown")
+        if has_x11_mount and display_env:
+            if x_mode == "xwayland":
+                x11_display = f"[green]Enabled[/] (XWayland, DISPLAY={display_env})"
+            elif x_mode == "x11":
+                x11_display = f"[green]Enabled[/] (X11, DISPLAY={display_env})"
+            else:
+                x11_display = f"[green]Enabled[/] (DISPLAY={display_env})"
+        else:
+            x11_display = "[red]Disabled[/]"
+
         table = Table(show_header=False, box=None, padding=(0, 2))
         table.add_column(style="bold cyan")
         table.add_column(style="white")
@@ -279,6 +294,7 @@ class NihilController:
         table.add_row("Privileged", priv_display)
         table.add_row("Workspace", workspace_display)
         table.add_row("VPN", vpn_display)
+        table.add_row("X11", x11_display)
         title = "New container" if created else "Container"
         Console().print(Panel(table, title=f"[bold]{title}[/]", border_style="blue", padding=(0, 1)))
 

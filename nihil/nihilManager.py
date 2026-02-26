@@ -4,6 +4,7 @@
 
 import docker
 import io
+import os
 import tarfile
 from typing import Optional, Dict, List
 import sys
@@ -174,6 +175,7 @@ class NihilManager:
         workspace: Optional[str] = None,
         vpn: bool = False,
         vpn_config_path: Optional[str] = None,
+        enable_x11: bool = False,
     ):
         """Create a new container"""
         if image is None:
@@ -198,6 +200,15 @@ class NihilManager:
         
         if workspace:
             volumes[workspace] = {"bind": "/workspace", "mode": "rw"}
+
+        # X11 / XWayland support (opt-in).
+        # We only mount X11 if explicitly requested and if the host environment
+        # exposes a DISPLAY and a X11 socket directory.
+        if enable_x11:
+            display = os.environ.get("DISPLAY")
+            x11_socket = Path("/tmp/.X11-unix")
+            if display and x11_socket.exists():
+                volumes[str(x11_socket)] = {"bind": "/tmp/.X11-unix", "mode": "rw"}
         
         if volumes:
             container_config["volumes"] = volumes
@@ -222,6 +233,39 @@ class NihilManager:
                     kv.split("=", 1) for kv in container_config["environment"] if "=" in kv
                 )
             container_config["environment"]["NIHIL_VPN"] = "1"
+
+        # X11 env: forward DISPLAY (and XAUTHORITY if present) when X11 is enabled.
+        if enable_x11:
+            display = os.environ.get("DISPLAY")
+            if display:
+                container_config["environment"] = container_config.get("environment") or {}
+                if isinstance(container_config["environment"], list):
+                    container_config["environment"] = dict(
+                        kv.split("=", 1) for kv in container_config["environment"] if "=" in kv
+                    )
+                container_config["environment"]["DISPLAY"] = display
+
+                # Detect host graphical stack to expose a simple hint inside the container.
+                session_type = os.environ.get("XDG_SESSION_TYPE", "").lower()
+                wayland_display = os.environ.get("WAYLAND_DISPLAY")
+                if session_type == "wayland" or wayland_display:
+                    x_mode = "xwayland"
+                elif session_type == "x11":
+                    x_mode = "x11"
+                else:
+                    x_mode = "unknown"
+                container_config["environment"]["NIHIL_X_MODE"] = x_mode
+                xauth = os.environ.get("XAUTHORITY")
+                if xauth:
+                    xauth_path = Path(xauth).expanduser()
+                    if xauth_path.is_file():
+                        if "volumes" not in container_config:
+                            container_config["volumes"] = {}
+                        # Mount XAUTHORITY into the same path inside the container.
+                        container_config["volumes"][str(xauth_path)] = {
+                            "bind": str(xauth_path),
+                            "mode": "ro",
+                        }
         
         # Mount user resources if available
         user_resources = Path.home() / ".nihil" / "my-resources"
