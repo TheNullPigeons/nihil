@@ -92,6 +92,11 @@ Examples:
         default=None,
         help="Path to OpenVPN config file (.ovpn). Starts the container with VPN; VPN stops when you exit the container.",
     )
+    start_parser.add_argument(
+        "--enable-x11",
+        action="store_true",
+        help="Enable X11/XWayland GUI support (mount host X socket and forward DISPLAY).",
+    )
     start_parser.add_argument("--log", "-l", action="store_true", help="Enable shell logging (asciinema)")
     start_parser.add_argument("--no-shell", action="store_true", help="Don't open shell after starting")
     
