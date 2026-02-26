@@ -57,7 +57,7 @@ class NihilController:
             return e.exit_code
         
         if parsed_args.command == "info":
-            return self._cmd_info()
+            return self._cmd_info(parsed_args)
         elif parsed_args.command == "images":
             return self._cmd_images()
         elif parsed_args.command == "start":
@@ -611,8 +611,19 @@ class NihilController:
         print(self.formatter.info("Usage: nihil start <name> --image <variant>"))
         return 0
     
-    def _cmd_info(self) -> int:
-        """Display information about images and containers"""
+    def _cmd_info(self, args) -> int:
+        """Display information about images and containers, or a specific container."""
+        # If a specific container is requested, show the detailed panel and exit.
+        container_name = getattr(args, "container", None)
+        if container_name:
+            self.manager = self.manager or NihilManager()
+            container = self.manager.get_container(container_name)
+            if not container:
+                print(self.formatter.error(f"Container '{container_name}' doesn't exist."), file=sys.stderr)
+                return 1
+            self._print_container_info(container, args, created=False)
+            return 0
+
         print(self.formatter.info(f"Nihil version {__version__}\n"))
         
         variant_descriptions = {

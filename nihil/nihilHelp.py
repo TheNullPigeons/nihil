@@ -47,6 +47,12 @@ Examples:
         "info",
         help="Display information about images and containers"
     )
+    info_parser.add_argument(
+        "--container",
+        "-c",
+        metavar="NAME",
+        help="Show detailed information for a specific container",
+    )
     
     # Command: images
     images_parser = subparsers.add_parser(
