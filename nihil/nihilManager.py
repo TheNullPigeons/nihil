@@ -176,6 +176,7 @@ class NihilManager:
         vpn: bool = False,
         vpn_config_path: Optional[str] = None,
         enable_x11: bool = False,
+        disable_my_resources: bool = False,
     ):
         """Create a new container"""
         if image is None:
@@ -267,9 +268,9 @@ class NihilManager:
                             "mode": "ro",
                         }
         
-        # Mount user resources if available
+        # Mount user resources if available (can be disabled via flag).
         user_resources = Path.home() / ".nihil" / "my-resources"
-        if user_resources.exists():
+        if not disable_my_resources and user_resources.exists():
             if "volumes" not in container_config:
                 container_config["volumes"] = {}
             container_config["volumes"][str(user_resources)] = {

@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """Nihil Controller - Orchestrates command execution"""
 
+import os
 import sys
 from pathlib import Path
 from typing import Optional, List
@@ -158,15 +159,24 @@ class NihilController:
             print(self.formatter.info(f"Using image variant: {image_arg} ({image})"))
             
             vpn_path = getattr(args, "vpn", None)
+            # Workspace selection: explicit --workspace wins, otherwise --workspace-here uses current directory.
+            workspace_path = args.workspace
+            if workspace_path is None and getattr(args, "workspace_here", False):
+                workspace_path = os.getcwd()
+            # Docker requires an absolute host path for bind mounts.
+            if workspace_path is not None:
+                workspace_path = str(Path(workspace_path).expanduser().resolve())
+
             container = self.manager.create_container(
                 name=container_name,
                 image=image,
                 privileged=args.privileged,
                 network_mode=network_map.get(args.network, "host"),
-                workspace=args.workspace,
+                workspace=workspace_path,
                 vpn=bool(vpn_path),
                 vpn_config_path=vpn_path,
                 enable_x11=getattr(args, "enable_x11", False),
+                disable_my_resources=getattr(args, "no_my_resources", False),
             )
             print(self.formatter.info(f"Container '{container_name}' created."))
             print(self.formatter.info(f"Starting container '{container_name}'..."))

@@ -93,6 +93,11 @@ Examples:
     )
     start_parser.add_argument("--workspace", help="Workspace path to mount")
     start_parser.add_argument(
+        "--workspace-here",
+        action="store_true",
+        help="Mount the current working directory as /workspace inside the container.",
+    )
+    start_parser.add_argument(
         "--vpn",
         metavar="FILE",
         default=None,
@@ -102,6 +107,11 @@ Examples:
         "--enable-x11",
         action="store_true",
         help="Enable X11/XWayland GUI support (mount host X socket and forward DISPLAY).",
+    )
+    start_parser.add_argument(
+        "--no-my-resources",
+        action="store_true",
+        help="Do not mount '~/.nihil/my-resources' into the container.",
     )
     start_parser.add_argument("--log", "-l", action="store_true", help="Enable shell logging (asciinema)")
     start_parser.add_argument("--no-shell", action="store_true", help="Don't open shell after starting")
