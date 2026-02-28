@@ -167,6 +167,9 @@ class NihilController:
             if workspace_path is not None:
                 workspace_path = str(Path(workspace_path).expanduser().resolve())
 
+            browser_ui_enabled = getattr(args, "browser_ui", False)
+            browser_ui_port = getattr(args, "browser_ui_port", None)
+
             container = self.manager.create_container(
                 name=container_name,
                 image=image,
@@ -177,6 +180,8 @@ class NihilController:
                 vpn_config_path=vpn_path,
                 enable_x11=getattr(args, "enable_x11", False),
                 disable_my_resources=getattr(args, "no_my_resources", False),
+                 browser_ui=browser_ui_enabled,
+                 browser_ui_port=browser_ui_port if browser_ui_enabled else None,
             )
             print(self.formatter.info(f"Container '{container_name}' created."))
             print(self.formatter.info(f"Starting container '{container_name}'..."))
@@ -243,10 +248,12 @@ class NihilController:
                 k, v = kv.split("=", 1)
                 env[k] = v
         workspace_mount = None
+        my_resources_mount = None
         for m in mounts:
             if m.get("Destination") == "/workspace":
                 workspace_mount = m.get("Source")
-                break
+            if m.get("Destination") == "/opt/my-resources":
+                my_resources_mount = m.get("Source")
         # Build colored displays
         if network_mode == "host":
             network_display = "[yellow]host[/] (shares host network)"
@@ -263,6 +270,11 @@ class NihilController:
             workspace_display = f"[green]{workspace_mount}[/] → [cyan]/workspace[/]"
         else:
             workspace_display = "[cyan]/workspace[/] (default, no host mount)"
+
+        if my_resources_mount:
+            my_resources_display = f"[green]Enabled[/] ({my_resources_mount} → /opt/my-resources)"
+        else:
+            my_resources_display = "[red]Disabled[/]"
 
         # VPN display: created containers with NIHIL_VPN=1 vs session-only VPN on existing containers.
         # For existing containers started with --vpn but without /dev/net/tun, show as disabled.
@@ -294,6 +306,14 @@ class NihilController:
         else:
             x11_display = "[red]Disabled[/]"
 
+        # Browser UI (noVNC) display.
+        browser_ui_flag = env.get("NIHIL_BROWSER_UI") == "1"
+        browser_ui_port = env.get("NIHIL_BROWSER_UI_PORT") or "6901"
+        if browser_ui_flag:
+            browser_ui_display = f"[green]Enabled[/] (http://127.0.0.1:{browser_ui_port})"
+        else:
+            browser_ui_display = "[red]Disabled[/]"
+
         table = Table(show_header=False, box=None, padding=(0, 2))
         table.add_column(style="bold cyan")
         table.add_column(style="white")
@@ -303,8 +323,10 @@ class NihilController:
         table.add_row("Network", network_display)
         table.add_row("Privileged", priv_display)
         table.add_row("Workspace", workspace_display)
+        table.add_row("My resources", my_resources_display)
         table.add_row("VPN", vpn_display)
         table.add_row("X11", x11_display)
+        table.add_row("Browser UI", browser_ui_display)
         title = "New container" if created else "Container"
         Console().print(Panel(table, title=f"[bold]{title}[/]", border_style="blue", padding=(0, 1)))
 
