@@ -3,7 +3,9 @@
 """Nihil Controller - Orchestrates command execution"""
 
 import os
+import socket
 import sys
+import time
 from pathlib import Path
 from typing import Optional, List
 
@@ -218,7 +220,32 @@ class NihilController:
                 self.manager.exec_in_container(container, "mkdir -p /workspace/logs")
                 print(self.formatter.info(f"Logging session to {logfile}"))
                 command = f"asciinema rec -i 2 --stdin --quiet --command zsh --title '{title}' {logfile}"
-            
+
+            # Si Browser UI est activé, attendre que le port noVNC écoute avant d'ouvrir le shell
+            env_list = container.attrs.get("Config", {}).get("Env") or []
+            browser_ui_port = None
+            if any(e == "NIHIL_BROWSER_UI=1" for e in env_list):
+                for e in env_list:
+                    if e.startswith("NIHIL_BROWSER_UI_PORT="):
+                        try:
+                            browser_ui_port = int(e.split("=", 1)[1])
+                            break
+                        except ValueError:
+                            pass
+            if browser_ui_port:
+                print(self.formatter.info("Preparing browser UI..."))
+                deadline = time.monotonic() + 45
+                while time.monotonic() < deadline:
+                    try:
+                        with socket.create_connection(("127.0.0.1", browser_ui_port), timeout=1):
+                            pass
+                        print(self.formatter.success("Browser UI ready."))
+                        break
+                    except (socket.error, OSError):
+                        time.sleep(1)
+                else:
+                    print(self.formatter.warning("Browser UI may still be starting; open the link from the recap when ready."))
+
             print(self.formatter.info(f"Connecting to container '{container_name}'..."))
             self.manager.exec_in_container(container, command)
         
