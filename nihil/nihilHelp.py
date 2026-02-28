@@ -113,6 +113,18 @@ Examples:
         action="store_true",
         help="Do not mount '~/.nihil/my-resources' into the container.",
     )
+    start_parser.add_argument(
+        "--browser-ui",
+        action="store_true",
+        help="Expose a browser-based UI (noVNC) for this session.",
+    )
+    start_parser.add_argument(
+        "--browser-ui-port",
+        type=int,
+        default=None,
+        metavar="PORT",
+        help="Port for the browser UI (default: random 6901-6999 if not set).",
+    )
     start_parser.add_argument("--log", "-l", action="store_true", help="Enable shell logging (asciinema)")
     start_parser.add_argument("--no-shell", action="store_true", help="Don't open shell after starting")
     

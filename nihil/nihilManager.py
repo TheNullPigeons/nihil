@@ -5,8 +5,9 @@
 import docker
 import io
 import os
+import random
 import tarfile
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Set
 import sys
 from pathlib import Path
 from nihil.nihilFormatter import NihilFormatter
@@ -177,6 +178,8 @@ class NihilManager:
         vpn_config_path: Optional[str] = None,
         enable_x11: bool = False,
         disable_my_resources: bool = False,
+        browser_ui: bool = False,
+        browser_ui_port: Optional[int] = None,
     ):
         """Create a new container"""
         if image is None:
@@ -282,6 +285,31 @@ class NihilManager:
         if vpn and vpn_config_path:
             container_config["cap_add"] = ["NET_ADMIN"]
             container_config["devices"] = ["/dev/net/tun"]
+
+        # Browser UI: expose env + (optionally) port mapping for VNC/noVNC.
+        if browser_ui:
+            if browser_ui_port is None:
+                used_ports = self.get_used_browser_ui_ports()
+                for lo, hi in [(6901, 7000), (7000, 7100)]:
+                    candidates = [p for p in range(lo, hi) if p not in used_ports]
+                    if candidates:
+                        browser_ui_port = random.choice(candidates)
+                        break
+                else:
+                    browser_ui_port = 6901  # fallback si tout est pris
+            container_config["environment"] = container_config.get("environment") or {}
+            if isinstance(container_config["environment"], list):
+                container_config["environment"] = dict(
+                    kv.split("=", 1) for kv in container_config["environment"] if "=" in kv
+                )
+            container_config["environment"]["NIHIL_BROWSER_UI"] = "1"
+            container_config["environment"]["NIHIL_BROWSER_UI_PORT"] = str(browser_ui_port)
+            # Port binding only when not using host network mode.
+            if network_mode not in ("host", "none", "disabled"):
+                port_key = f"{browser_ui_port}/tcp"
+                host_binding = ("127.0.0.1", browser_ui_port)
+                container_config["ports"] = container_config.get("ports") or {}
+                container_config["ports"][port_key] = host_binding
         
         try:
             container = self.client.containers.create(**container_config)
@@ -313,6 +341,20 @@ class NihilManager:
         except docker.errors.APIError as e:
             raise ContainerRemoveFailed(name=getattr(container, "name", "<unknown>"), message=f"Erreur remove: {e}")
     
+    def get_used_browser_ui_ports(self) -> Set[int]:
+        """Return the set of ports already used by browser UI on other nihil containers."""
+        used: Set[int] = set()
+        for c in self.list_containers(all=True):
+            env_list = c.attrs.get("Config", {}).get("Env") or []
+            for kv in env_list:
+                if kv.startswith("NIHIL_BROWSER_UI_PORT="):
+                    try:
+                        used.add(int(kv.split("=", 1)[1]))
+                    except ValueError:
+                        pass
+                    break
+        return used
+
     def list_containers(self, all: bool = True) -> List:
         """List all nihil containers"""
         try:
