@@ -125,6 +125,13 @@ Examples:
         metavar="PORT",
         help="Port for the browser UI (default: random 6901-6999 if not set).",
     )
+    start_parser.add_argument(
+        "--browser-ui-password",
+        type=str,
+        default=None,
+        metavar="PASSWORD",
+        help="Password for browser UI session (default: random, shown once when ready).",
+    )
     start_parser.add_argument("--log", "-l", action="store_true", help="Enable shell logging (asciinema)")
     start_parser.add_argument("--no-shell", action="store_true", help="Don't open shell after starting")
     
