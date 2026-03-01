@@ -38,7 +38,7 @@ def temp_history_path(tmp_path, monkeypatch):
     history_file = tmp_path / "history.log"
     history_file.parent.mkdir(parents=True, exist_ok=True)
     
-    from nihil.nihilHistory import HISTORY_PATH
-    monkeypatch.setattr("nihil.nihilHistory.HISTORY_PATH", history_file)
+    from nihil.utils.history import HISTORY_PATH
+    monkeypatch.setattr("nihil.utils.history.HISTORY_PATH", history_file)
     
     return history_file

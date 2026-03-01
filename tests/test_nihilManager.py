@@ -6,8 +6,9 @@ import pytest
 from unittest.mock import MagicMock, Mock, patch, call
 import docker.errors
 
-from nihil.nihilManager import NihilManager, ensure_filesystem
-from nihil.nihilError import (
+from nihil.manager import NihilManager
+from nihil.config import ensure_filesystem
+from nihil.exceptions import (
     DockerUnavailable,
     ImagePullFailed,
     ContainerCreateFailed,
@@ -22,8 +23,8 @@ class TestNihilManager:
     
     def test_init_success(self, mock_docker_client):
         """Test initialisation réussie avec Docker disponible"""
-        with patch('nihil.nihilManager.docker.from_env', return_value=mock_docker_client):
-            with patch('nihil.nihilManager.ensure_filesystem'):
+        with patch('nihil.manager.manager.docker.from_env', return_value=mock_docker_client):
+            with patch('nihil.manager.manager.ensure_filesystem'):
                 manager = NihilManager()
                 assert manager.client == mock_docker_client
                 mock_docker_client.ping.assert_called_once()
@@ -32,8 +33,8 @@ class TestNihilManager:
         """Test initialisation échoue si Docker indisponible"""
         mock_docker_client.ping.side_effect = docker.errors.DockerException("Connection refused")
         
-        with patch('nihil.nihilManager.docker.from_env', return_value=mock_docker_client):
-            with patch('nihil.nihilManager.ensure_filesystem'):
+        with patch('nihil.manager.manager.docker.from_env', return_value=mock_docker_client):
+            with patch('nihil.manager.manager.ensure_filesystem'):
                 with pytest.raises(DockerUnavailable):
                     NihilManager()
     
@@ -42,8 +43,8 @@ class TestNihilManager:
         mock_image = MagicMock()
         mock_docker_client.images.get.return_value = mock_image
         
-        with patch('nihil.nihilManager.docker.from_env', return_value=mock_docker_client):
-            with patch('nihil.nihilManager.ensure_filesystem'):
+        with patch('nihil.manager.manager.docker.from_env', return_value=mock_docker_client):
+            with patch('nihil.manager.manager.ensure_filesystem'):
                 manager = NihilManager()
                 result = manager.ensure_image_exists("test-image:latest")
                 
@@ -51,28 +52,33 @@ class TestNihilManager:
                 mock_docker_client.images.get.assert_called_once_with("test-image:latest")
     
     def test_ensure_image_exists_pull_success(self, mock_docker_client, mock_formatter):
-        """Test ensure_image_exists quand il faut pull l'image"""
+        """Test ensure_image_exists quand il faut pull l'image (manager utilise client.api.pull)."""
         mock_docker_client.images.get.side_effect = docker.errors.ImageNotFound("Not found")
-        mock_docker_client.images.pull.return_value = MagicMock()
+        # _pull_with_progress fait: for event in self.client.api.pull(image, stream=True, decode=True)
+        mock_docker_client.api.pull.return_value = iter([{"id": "layer1", "status": "Pull complete"}])
         
-        with patch('nihil.nihilManager.docker.from_env', return_value=mock_docker_client):
-            with patch('nihil.nihilManager.ensure_filesystem'):
+        with patch('nihil.manager.manager.docker.from_env', return_value=mock_docker_client):
+            with patch('nihil.manager.manager.ensure_filesystem'):
                 with patch('builtins.print'):
                     manager = NihilManager()
                     result = manager.ensure_image_exists("test-image:latest")
                     
                     assert result is True
-                    mock_docker_client.images.pull.assert_called_once_with("test-image:latest")
+                    mock_docker_client.api.pull.assert_called_once_with(
+                        "test-image:latest", stream=True, decode=True
+                    )
     
     def test_ensure_image_exists_pull_fails(self, mock_docker_client):
-        """Test ensure_image_exists quand le pull échoue"""
+        """Test ensure_image_exists quand le pull échoue (manager utilise client.api.pull)."""
         mock_docker_client.images.get.side_effect = docker.errors.ImageNotFound("Not found")
         mock_response = MagicMock()
         mock_response.status_code = 500
-        mock_docker_client.images.pull.side_effect = docker.errors.APIError("Pull failed", response=mock_response)
+        mock_docker_client.api.pull.side_effect = docker.errors.APIError(
+            "Pull failed", response=mock_response
+        )
         
-        with patch('nihil.nihilManager.docker.from_env', return_value=mock_docker_client):
-            with patch('nihil.nihilManager.ensure_filesystem'):
+        with patch('nihil.manager.manager.docker.from_env', return_value=mock_docker_client):
+            with patch('nihil.manager.manager.ensure_filesystem'):
                 with patch('builtins.print'):
                     manager = NihilManager()
                     with pytest.raises(ImagePullFailed):
@@ -84,8 +90,8 @@ class TestNihilManager:
         mock_docker_client.containers.create.return_value = mock_container
         mock_docker_client.images.get.return_value = MagicMock()
         
-        with patch('nihil.nihilManager.docker.from_env', return_value=mock_docker_client):
-            with patch('nihil.nihilManager.ensure_filesystem'):
+        with patch('nihil.manager.manager.docker.from_env', return_value=mock_docker_client):
+            with patch('nihil.manager.manager.ensure_filesystem'):
                 manager = NihilManager()
                 container = manager.create_container("test-container")
                 
@@ -107,8 +113,8 @@ class TestNihilManager:
         mock_docker_client.containers.create.return_value = mock_container
         mock_docker_client.images.get.return_value = MagicMock()
         
-        with patch('nihil.nihilManager.docker.from_env', return_value=mock_docker_client):
-            with patch('nihil.nihilManager.ensure_filesystem'):
+        with patch('nihil.manager.manager.docker.from_env', return_value=mock_docker_client):
+            with patch('nihil.manager.manager.ensure_filesystem'):
                 manager = NihilManager()
                 container = manager.create_container("test-container", privileged=True)
                 
@@ -121,8 +127,8 @@ class TestNihilManager:
         mock_docker_client.containers.create.return_value = mock_container
         mock_docker_client.images.get.return_value = MagicMock()
         
-        with patch('nihil.nihilManager.docker.from_env', return_value=mock_docker_client):
-            with patch('nihil.nihilManager.ensure_filesystem'):
+        with patch('nihil.manager.manager.docker.from_env', return_value=mock_docker_client):
+            with patch('nihil.manager.manager.ensure_filesystem'):
                 manager = NihilManager()
                 container = manager.create_container("test-container", workspace="/tmp/test")
                 
@@ -139,8 +145,8 @@ class TestNihilManager:
         mock_docker_client.containers.create.return_value = mock_container
         mock_docker_client.images.get.return_value = MagicMock()
         
-        with patch('nihil.nihilManager.docker.from_env', return_value=mock_docker_client):
-            with patch('nihil.nihilManager.ensure_filesystem'):
+        with patch('nihil.manager.manager.docker.from_env', return_value=mock_docker_client):
+            with patch('nihil.manager.manager.ensure_filesystem'):
                 manager = NihilManager()
                 container = manager.create_container("test-container", network_mode="host")
                 
@@ -154,8 +160,8 @@ class TestNihilManager:
         mock_response.status_code = 500
         mock_docker_client.containers.create.side_effect = docker.errors.APIError("Create failed", response=mock_response)
         
-        with patch('nihil.nihilManager.docker.from_env', return_value=mock_docker_client):
-            with patch('nihil.nihilManager.ensure_filesystem'):
+        with patch('nihil.manager.manager.docker.from_env', return_value=mock_docker_client):
+            with patch('nihil.manager.manager.ensure_filesystem'):
                 manager = NihilManager()
                 with pytest.raises(ContainerCreateFailed):
                     manager.create_container("test-container")
@@ -173,8 +179,8 @@ class TestNihilManager:
         
         mock_docker_client.containers.list.return_value = [nihil_container, other_container]
         
-        with patch('nihil.nihilManager.docker.from_env', return_value=mock_docker_client):
-            with patch('nihil.nihilManager.ensure_filesystem'):
+        with patch('nihil.manager.manager.docker.from_env', return_value=mock_docker_client):
+            with patch('nihil.manager.manager.ensure_filesystem'):
                 manager = NihilManager()
                 containers = manager.list_containers()
                 
@@ -189,8 +195,8 @@ class TestNihilManager:
         
         mock_docker_client.containers.list.return_value = [nihil_container]
         
-        with patch('nihil.nihilManager.docker.from_env', return_value=mock_docker_client):
-            with patch('nihil.nihilManager.ensure_filesystem'):
+        with patch('nihil.manager.manager.docker.from_env', return_value=mock_docker_client):
+            with patch('nihil.manager.manager.ensure_filesystem'):
                 manager = NihilManager()
                 containers = manager.list_containers()
                 

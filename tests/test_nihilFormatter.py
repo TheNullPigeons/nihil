@@ -5,7 +5,7 @@
 import pytest
 from unittest.mock import patch, MagicMock
 
-from nihil.nihilFormatter import NihilFormatter
+from nihil.console import NihilFormatter
 
 
 class TestNihilFormatter:

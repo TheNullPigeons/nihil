@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Banner display for Nihil - TheNullPigeons"""
+"""Bannière Nihil — TheNullPigeons."""
 
 import sys
 from typing import Optional
 
 
 def get_banner() -> str:
-    """Generate the Nihil banner with pigeons"""
     banner = """
     ╔═══════════════════════════════════════════════╗
     ║     ███╗   ██╗██╗██╗  ██╗██╗██╗     ██╗       ║
@@ -25,16 +24,12 @@ def get_banner() -> str:
 
 
 def print_banner(file: Optional[object] = None) -> None:
-    """Print the Nihil banner"""
     if file is None:
         file = sys.stdout
-    
-    banner = get_banner()
-    print(banner, file=file, end='')
+    print(get_banner(), file=file, end='')
 
 
 def get_compact_banner() -> str:
-    """Generate a compact version of the banner"""
     return """
     ╔═══════════════════════════════════════════════╗
     ║  NIHIL - TheNullPigeons                       ║
@@ -46,9 +41,6 @@ def get_compact_banner() -> str:
 
 
 def print_compact_banner(file: Optional[object] = None) -> None:
-    """Print a compact version of the banner"""
     if file is None:
         file = sys.stdout
-    
-    banner = get_banner()
-    print(banner, file=file, end='')
+    print(get_banner(), file=file, end='')
