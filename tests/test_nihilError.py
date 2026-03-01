@@ -5,7 +5,7 @@
 import pytest
 import sys
 
-from nihil.nihilError import (
+from nihil.exceptions import (
     NihilError,
     DockerUnavailable,
     ImagePullFailed,

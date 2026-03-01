@@ -6,7 +6,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import patch, mock_open
 
-from nihil.nihilHistory import log_command, HISTORY_PATH
+from nihil.utils import log_command, HISTORY_PATH
 
 
 class TestNihilHistory:
@@ -25,7 +25,7 @@ class TestNihilHistory:
     def test_log_command_creates_directory(self, tmp_path, monkeypatch):
         """Test log_command crée le répertoire si nécessaire"""
         history_file = tmp_path / "new_dir" / "history.log"
-        monkeypatch.setattr("nihil.nihilHistory.HISTORY_PATH", history_file)
+        monkeypatch.setattr("nihil.utils.history.HISTORY_PATH", history_file)
         
         log_command(["test"], exit_code=0)
         
@@ -39,7 +39,7 @@ class TestNihilHistory:
         history_file.write_text("existing")
         history_file.chmod(0o000)  # Pas d'accès
         
-        monkeypatch.setattr("nihil.nihilHistory.HISTORY_PATH", history_file)
+        monkeypatch.setattr("nihil.utils.history.HISTORY_PATH", history_file)
         
         try:
             log_command(["test"], exit_code=0)

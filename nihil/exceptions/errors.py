@@ -1,10 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Nihil Errors - Domain exceptions and exit codes.
-
-This module centralizes Nihil-specific exceptions so the rest of the codebase
-can raise meaningful errors without calling sys.exit() deep in the stack.
-"""
+"""Exceptions Nihil (erreurs métier et codes de sortie)."""
 
 from __future__ import annotations
 
@@ -112,7 +108,6 @@ class ContainerRemoveFailed(NihilError):
     def __init__(self, name: str, message: Optional[str] = None):
         super().__init__(message=message or f"Échec de suppression du conteneur: '{name}'", exit_code=9)
         self.name = name
-
 
 
 class ImageRemoveFailed(NihilError):
