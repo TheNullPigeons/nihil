@@ -13,5 +13,21 @@ dependencies = [
 authors = [{ name = "0xbbuddha" }, { name = "Goultarde" }]
 license = "MIT"
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+]
+
 [project.scripts]
-nihil = "nihil.nihilController:main"
+nihil = "nihil.cli.controller:main"
+
+[tool.coverage.run]
+source = ["nihil"]
+branch = true
+omit = ["nihil/__main__.py", "*/tests/*"]
+
+[tool.coverage.report]
+exclude_lines = ["pragma: no cover", "def __repr__", "raise NotImplementedError"]
+show_missing = true
+fail_under = 0
