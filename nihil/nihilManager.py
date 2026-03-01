@@ -180,6 +180,7 @@ class NihilManager:
         disable_my_resources: bool = False,
         browser_ui: bool = False,
         browser_ui_port: Optional[int] = None,
+        browser_ui_password: Optional[str] = None,
     ):
         """Create a new container"""
         if image is None:
@@ -304,6 +305,8 @@ class NihilManager:
                 )
             container_config["environment"]["NIHIL_BROWSER_UI"] = "1"
             container_config["environment"]["NIHIL_BROWSER_UI_PORT"] = str(browser_ui_port)
+            if browser_ui_password:
+                container_config["environment"]["NIHIL_BROWSER_UI_PASSWORD"] = browser_ui_password
             # Port binding only when not using host network mode.
             if network_mode not in ("host", "none", "disabled"):
                 port_key = f"{browser_ui_port}/tcp"

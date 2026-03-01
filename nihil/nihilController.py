@@ -2,12 +2,16 @@
 # -*- coding: utf-8 -*-
 """Nihil Controller - Orchestrates command execution"""
 
+import json
 import os
+import secrets
 import socket
 import sys
 import time
 from pathlib import Path
 from typing import Optional, List
+from urllib.request import urlopen, Request
+from urllib.error import URLError, HTTPError
 
 from nihil.nihilManager import NihilManager, ensure_filesystem
 from nihil.nihilHelp import create_parser
@@ -19,6 +23,9 @@ from nihil.nihilHistory import log_command
 from nihil.nihilBanner import print_compact_banner
 
 
+BROWSER_UI_PASSWORDS_FILE = Path.home() / ".nihil" / "browser_ui_passwords.json"
+
+
 class NihilController:
     """Orchestrates command execution"""
     
@@ -27,7 +34,73 @@ class NihilController:
         self.parser = create_parser()
         self.manager = None
         self.formatter = NihilFormatter()
-    
+
+    def _save_browser_ui_password(self, container_name: str, password: str) -> None:
+        """Persist generated Browser UI password (wrapper-generated only)."""
+        path = BROWSER_UI_PASSWORDS_FILE
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data = {}
+        if path.exists():
+            try:
+                data = json.loads(path.read_text())
+            except (json.JSONDecodeError, OSError):
+                pass
+        data[container_name] = password
+        path.write_text(json.dumps(data, indent=0))
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass
+
+    def _load_browser_ui_password(self, container_name: str) -> Optional[str]:
+        """Return stored Browser UI password for container, or None."""
+        path = BROWSER_UI_PASSWORDS_FILE
+        if not path.exists():
+            return None
+        try:
+            data = json.loads(path.read_text())
+            return data.get(container_name)
+        except (json.JSONDecodeError, OSError):
+            return None
+
+    def _clear_browser_ui_password(self, container_name: str) -> None:
+        """Remove stored Browser UI password when container is removed."""
+        path = BROWSER_UI_PASSWORDS_FILE
+        if not path.exists():
+            return
+        try:
+            data = json.loads(path.read_text())
+            data.pop(container_name, None)
+            if data:
+                path.write_text(json.dumps(data, indent=0))
+            else:
+                path.unlink()
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    def _get_session_str_for_recap(self, container, container_name: str) -> Optional[str]:
+        """Return 'root:password' or 'root:***' for recap; None if unknown."""
+        pwd = self._load_browser_ui_password(container_name)
+        if pwd:
+            return f"root:{pwd}"
+        env_list = container.attrs.get("Config", {}).get("Env") or []
+        if any(e.startswith("NIHIL_BROWSER_UI_PASSWORD=") for e in env_list):
+            return "root:***"
+        return None
+
+    @staticmethod
+    def _is_browser_ui_ready(port: int) -> bool:
+        """True if the Browser UI page is served (HTTP 200 + page content)."""
+        try:
+            req = Request(f"http://127.0.0.1:{port}/", headers={"User-Agent": "Nihil-Wrapper"})
+            with urlopen(req, timeout=3) as resp:
+                if resp.status != 200:
+                    return False
+                body = resp.read().decode("utf-8", errors="ignore")
+                return "Nihil" in body
+        except (URLError, HTTPError, OSError, ValueError):
+            return False
+
     def run(self, args: Optional[list] = None) -> int:
         """Run the controller with parsed arguments"""
         parsed_args = self.parser.parse_args(args)
@@ -96,7 +169,11 @@ class NihilController:
                 print(self.formatter.info(f"Starting container '{container_name}'..."))
                 self.manager.start_container(container)
                 print(self.formatter.success(f"Container '{container_name}' started successfully."))
-            self._print_container_info(container, args, created=False)
+            # Retarder l'affichage des infos si Browser UI : on les affichera avec Session (login:mdp) après préparation
+            env_list = container.attrs.get("Config", {}).get("Env") or []
+            delay_info = not args.no_shell and any(e == "NIHIL_BROWSER_UI=1" for e in env_list)
+            if not delay_info:
+                self._print_container_info(container, args, created=False)
         else:
             print(self.formatter.info(f"Container '{container_name}' doesn't exist. Creating..."))
             network_map = {
@@ -171,6 +248,11 @@ class NihilController:
 
             browser_ui_enabled = getattr(args, "browser_ui", False)
             browser_ui_port = getattr(args, "browser_ui_port", None)
+            browser_ui_password = getattr(args, "browser_ui_password", None)
+            # Wrapper génère le mdp et l'injecte : le script container utilise NIHIL_BROWSER_UI_PASSWORD
+            if browser_ui_enabled and browser_ui_password is None:
+                browser_ui_password = secrets.token_urlsafe(12)
+                self._save_browser_ui_password(container_name, browser_ui_password)
 
             container = self.manager.create_container(
                 name=container_name,
@@ -184,12 +266,15 @@ class NihilController:
                 disable_my_resources=getattr(args, "no_my_resources", False),
                  browser_ui=browser_ui_enabled,
                  browser_ui_port=browser_ui_port if browser_ui_enabled else None,
+                 browser_ui_password=browser_ui_password if browser_ui_enabled else None,
             )
             print(self.formatter.info(f"Container '{container_name}' created."))
             print(self.formatter.info(f"Starting container '{container_name}'..."))
             self.manager.start_container(container)
             print(self.formatter.success(f"Container '{container_name}' created and started successfully."))
-            self._print_container_info(container, args, created=True)
+            # Retarder l'affichage des infos si Browser UI : on les affichera avec Session (login:mdp) après préparation
+            if not (browser_ui_enabled and not args.no_shell):
+                self._print_container_info(container, args, created=True)
         
         if not args.no_shell:
             command = "zsh"
@@ -234,24 +319,28 @@ class NihilController:
                             pass
             if browser_ui_port:
                 print(self.formatter.info("Preparing browser UI..."))
-                deadline = time.monotonic() + 45
+                deadline = time.monotonic() + 180
                 while time.monotonic() < deadline:
-                    try:
-                        with socket.create_connection(("127.0.0.1", browser_ui_port), timeout=1):
-                            pass
+                    if self._is_browser_ui_ready(browser_ui_port):
                         print(self.formatter.success("Browser UI ready."))
                         break
-                    except (socket.error, OSError):
-                        time.sleep(1)
+                    time.sleep(2)
                 else:
                     print(self.formatter.warning("Browser UI may still be starting; open the link from the recap when ready."))
+                # Session (login:mdp) vient du wrapper (fichier local), pas lu depuis le container
+                session_str = self._get_session_str_for_recap(container, container_name)
+                self._print_container_info(
+                    container, args, created=not container_existed, browser_ui_session=session_str
+                )
 
             print(self.formatter.info(f"Connecting to container '{container_name}'..."))
             self.manager.exec_in_container(container, command)
         
         return 0
 
-    def _print_container_info(self, container, args, created: bool = False) -> None:
+    def _print_container_info(
+        self, container, args, created: bool = False, browser_ui_session: Optional[str] = None
+    ) -> None:
         """Print container summary (name, image, network, privileged, workspace) like Exegol."""
         try:
             from rich.console import Console
@@ -354,6 +443,11 @@ class NihilController:
         table.add_row("VPN", vpn_display)
         table.add_row("X11", x11_display)
         table.add_row("Browser UI", browser_ui_display)
+        if browser_ui_flag:
+            if browser_ui_session:
+                table.add_row("Session (browser)", f"[green]{browser_ui_session}[/]")
+            else:
+                table.add_row("Session (browser)", "[dim](see browser page)[/]")
         title = "New container" if created else "Container"
         Console().print(Panel(table, title=f"[bold]{title}[/]", border_style="blue", padding=(0, 1)))
 
@@ -458,6 +552,7 @@ class NihilController:
             
             print(self.formatter.info(f"Removing container '{container_name}'..."))
             self.manager.remove_container(container, force=args.force)
+            self._clear_browser_ui_password(container_name)
             print(self.formatter.success(f"Container '{container_name}' removed successfully."))
         
         return 1 if errors > 0 else 0
