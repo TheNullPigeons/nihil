@@ -67,6 +67,8 @@ class NihilController:
             return self._cmd_remove(parsed_args)
         elif parsed_args.command == "exec":
             return self._cmd_exec(parsed_args)
+        elif parsed_args.command == "update":
+            return self._cmd_update(parsed_args)
         elif parsed_args.command == "install":
             return self._cmd_install(parsed_args)
         elif parsed_args.command == "uninstall":
@@ -397,6 +399,54 @@ class NihilController:
         command = " ".join(args.command) if args.command else "zsh"
         self.manager.exec_in_container(container, command)
         return 0
+
+    def _cmd_update(self, args) -> int:
+        image_arg = getattr(args, "image", None)
+
+        if image_arg:
+            variants_to_update = [image_arg]
+        else:
+            installed = self.manager.list_images()
+            if not installed:
+                print(self.formatter.warning("No nihil images installed locally. Use 'nihil install' first."))
+                return 0
+            reverse_map = {v: k for k, v in self.manager.AVAILABLE_IMAGES.items() if k != "active-directory"}
+            variants_to_update = []
+            for img in installed:
+                for tag in img.tags:
+                    if tag in reverse_map:
+                        variants_to_update.append(reverse_map[tag])
+                        break
+            if not variants_to_update:
+                print(self.formatter.warning("No updatable nihil images found."))
+                return 0
+
+        errors = 0
+        for variant in variants_to_update:
+            image_tag = self.manager.AVAILABLE_IMAGES.get(variant)
+            if not image_tag:
+                print(self.formatter.error(f"Unknown image variant: {variant}"))
+                errors += 1
+                continue
+            old_id = None
+            try:
+                old_img = self.manager.client.images.get(image_tag)
+                old_id = old_img.short_id
+            except Exception:
+                pass
+            print(self.formatter.info(f"Updating '{variant}' ({image_tag})..."))
+            try:
+                self.manager._pull_with_progress(image_tag)
+                new_img = self.manager.client.images.get(image_tag)
+                new_id = new_img.short_id
+                if old_id and old_id == new_id:
+                    print(self.formatter.info(f"'{variant}' is already up to date."))
+                else:
+                    print(self.formatter.success(f"'{variant}' updated successfully."))
+            except Exception as e:
+                print(self.formatter.error(f"Failed to update '{variant}': {e}"))
+                errors += 1
+        return 1 if errors > 0 else 0
 
     def _cmd_install(self, args) -> int:
         image_arg = args.image
