@@ -43,7 +43,7 @@ class TestCreateParser:
         assert args.command == "start"
         assert args.name == "myname"
         assert args.privileged is False
-        assert args.network == "host"
+        assert args.network is None  # None = use config default (fallback: host)
 
     def test_parse_start_with_options(self):
         parser = create_parser()

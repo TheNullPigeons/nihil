@@ -141,6 +141,7 @@ class NihilManager:
         vpn_config_path: Optional[str] = None,
         enable_x11: bool = False,
         disable_my_resources: bool = False,
+        my_resources_path: Optional[Path] = None,
         browser_ui: bool = False,
         browser_ui_port: Optional[int] = None,
         browser_ui_password: Optional[str] = None,
@@ -214,10 +215,11 @@ class NihilManager:
                             "bind": str(xauth_path),
                             "mode": "ro",
                         }
-        if not disable_my_resources and MY_RESOURCES_DIR.exists():
+        effective_my_resources = my_resources_path if my_resources_path is not None else MY_RESOURCES_DIR
+        if not disable_my_resources and effective_my_resources.exists():
             if "volumes" not in container_config:
                 container_config["volumes"] = {}
-            container_config["volumes"][str(MY_RESOURCES_DIR)] = {
+            container_config["volumes"][str(effective_my_resources)] = {
                 "bind": "/opt/my-resources",
                 "mode": "rw"
             }
