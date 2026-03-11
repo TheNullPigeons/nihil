@@ -45,7 +45,7 @@ Examples:
     start_parser = subparsers.add_parser("start", help="Start a container (creates it if it doesn't exist)")
     start_parser.add_argument("name", help="Container name")
     start_parser.add_argument("--privileged", action="store_true", help="Privileged mode")
-    start_parser.add_argument("--network", choices=["docker", "host", "disabled", "nat"], default="host", help="Network mode (default: host)")
+    start_parser.add_argument("--network", choices=["docker", "host", "disabled", "nat"], default=None, help="Network mode (default: from config, fallback: host)")
     start_parser.add_argument("--image", choices=["base", "ad", "active-directory", "web"], default=None, help="Image variant to use. If not specified, you will be prompted to select one.")
     start_parser.add_argument("--workspace", help="Workspace path to mount")
     start_parser.add_argument("--workspace-here", action="store_true", help="Mount the current working directory as /workspace inside the container.")
@@ -77,7 +77,10 @@ Examples:
 
     exec_parser = subparsers.add_parser("exec", help="Execute a command in a container")
     exec_parser.add_argument("name", help="Container name")
-    exec_parser.add_argument("command", nargs="*", help="Command to execute (default: bash)")
+    exec_parser.add_argument("command", nargs="*", help="Command to execute (default: zsh)")
+
+    config_parser = subparsers.add_parser("config", help="Show or edit the Nihil configuration file")
+    config_parser.add_argument("--edit", "-e", action="store_true", help="Open the config file in $EDITOR")
 
     completion_parser = subparsers.add_parser("completion", help="Generate shell completion script")
     completion_parser.add_argument("shell", choices=["bash", "zsh"], help="Target shell for completion script (bash or zsh)")

@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import List, Optional
 
-from nihil.config import ensure_filesystem
+from nihil.config import ensure_filesystem, NihilConfig
 from nihil.features.browser_ui import (
     save_password as browser_ui_save_password,
     load_password as browser_ui_load_password,
@@ -28,6 +28,7 @@ from nihil import __version__
 class NihilController:
     def __init__(self):
         ensure_filesystem()
+        self.config = NihilConfig()
         self.parser = create_parser()
         self.manager = None
         self.formatter = NihilFormatter()
@@ -36,7 +37,7 @@ class NihilController:
         parsed_args = self.parser.parse_args(args)
         should_show_banner = (
             parsed_args.command is not None and
-            parsed_args.command not in ["version", "completion"]
+            parsed_args.command not in ["version", "completion", "config"]
         )
         if should_show_banner:
             print_compact_banner()
@@ -50,6 +51,8 @@ class NihilController:
         if parsed_args.command == "doctor":
             doctor = NihilDoctor(formatter=self.formatter)
             return doctor.run()
+        if parsed_args.command == "config":
+            return self._cmd_config(parsed_args)
         try:
             self.manager = NihilManager()
         except NihilError as e:
@@ -79,6 +82,17 @@ class NihilController:
 
     def _cmd_start(self, args) -> int:
         container_name = args.name
+        # Appliquer les defaults de config pour les options non spécifiées par l'utilisateur
+        if args.network is None:
+            args.network = self.config.default_network
+        if not args.enable_x11 and self.config.x11_by_default:
+            args.enable_x11 = True
+        if not args.no_my_resources and not self.config.my_resources_enabled:
+            args.no_my_resources = True
+        if not args.log and self.config.logging_always_enable:
+            args.log = True
+        if args.workspace is None and not args.workspace_here and self.config.default_workspace:
+            args.workspace = str(self.config.default_workspace)
         print(self.formatter.info(f"Looking for container '{container_name}'..."))
         container = self.manager.get_container(container_name)
         container_existed = container is not None
@@ -153,6 +167,7 @@ class NihilController:
                 vpn_config_path=vpn_path,
                 enable_x11=getattr(args, "enable_x11", False),
                 disable_my_resources=getattr(args, "no_my_resources", False),
+                my_resources_path=self.config.my_resources_path,
                 browser_ui=browser_ui_enabled,
                 browser_ui_port=browser_ui_port if browser_ui_enabled else None,
                 browser_ui_password=browser_ui_password if browser_ui_enabled else None,
@@ -667,6 +682,41 @@ class NihilController:
             self.formatter.print_table(["NAME", "STATUS", "IMAGE", "CONFIG"], rows, [name_width, status_width, image_width, config_width])
         else:
             print("  No nihil containers found.")
+        return 0
+
+    def _cmd_config(self, args) -> int:
+        from nihil.config import CONFIG_FILE
+        if getattr(args, "edit", False):
+            import shutil
+            import subprocess
+            editor = os.environ.get("EDITOR") or shutil.which("nano") or shutil.which("vi") or "vi"
+            subprocess.run([editor, str(CONFIG_FILE)])
+            return 0
+        # Affichage de la config courante
+        try:
+            from rich.console import Console
+            from rich.panel import Panel
+            from rich.table import Table
+            console = Console()
+            cfg = self.config
+            table = Table(show_header=False, box=None, padding=(0, 2))
+            table.add_column(style="bold cyan")
+            table.add_column(style="white")
+            table.add_row("Config file", str(CONFIG_FILE))
+            table.add_row("", "")
+            table.add_row("[bold]network.default_network[/]", cfg.default_network)
+            table.add_row("[bold]workspace.default_path[/]", str(cfg.default_workspace) if cfg.default_workspace else "[dim]none[/]")
+            table.add_row("[bold]shell.default_shell[/]", cfg.default_shell)
+            table.add_row("[bold]shell.logging.always_enable[/]", "[green]yes[/]" if cfg.logging_always_enable else "[red]no[/]")
+            table.add_row("[bold]shell.logging.method[/]", cfg.logging_method)
+            table.add_row("[bold]my_resources.enabled[/]", "[green]yes[/]" if cfg.my_resources_enabled else "[red]no[/]")
+            table.add_row("[bold]my_resources.path[/]", str(cfg.my_resources_path))
+            table.add_row("[bold]display.x11_by_default[/]", "[green]yes[/]" if cfg.x11_by_default else "[red]no[/]")
+            table.add_row("[bold]updates.auto_check[/]", "[green]yes[/]" if cfg.auto_check_updates else "[red]no[/]")
+            console.print(Panel(table, title="[bold]Nihil Configuration[/]", border_style="blue", padding=(0, 1)))
+            print(self.formatter.info(f"Edit: nihil config --edit  or  $EDITOR {CONFIG_FILE}"))
+        except ImportError:
+            print(f"Config file: {CONFIG_FILE}")
         return 0
 
     def _cmd_completion(self, args) -> int:
