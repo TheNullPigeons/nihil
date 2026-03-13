@@ -121,3 +121,9 @@ class NihilFormatter:
                     line += f" {self._colorize(text_formatted, color) if color else text_formatted} {self._colorize(v, self.CYAN)}"
                 print(line)
             print_sep(bl, bm, br, h)
+
+    def print_docs_hint(self) -> None:
+        if self.console:
+            self.console.print("\n[dim]Docs: https://thenullpigeons.org/docs[/]")
+        else:
+            print(f"\n\033[2mDocs: https://thenullpigeons.org/docs\033[0m")

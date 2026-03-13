@@ -355,6 +355,55 @@ class NihilManager:
         full_command = ["docker", "exec", "-it", container_id] + cmd_args
         subprocess.run(full_command)
 
+    def check_image_update(self, image_tag: str) -> Optional[bool]:
+        """Retourne True si une mise à jour est disponible, False si à jour, None si le check a échoué."""
+        import json
+        import ssl
+        import urllib.request
+
+        try:
+            if "/" not in image_tag:
+                return None
+            registry, rest = image_tag.split("/", 1)
+            repo, tag = rest.rsplit(":", 1) if ":" in rest else (rest, "latest")
+
+            # Digest local
+            try:
+                local_img = self.client.images.get(image_tag)
+                local_digest = None
+                for d in local_img.attrs.get("RepoDigests", []):
+                    if "@" in d and repo in d:
+                        local_digest = d.split("@", 1)[1]
+                        break
+            except Exception:
+                return None
+
+            if not local_digest:
+                return None
+
+            ctx = ssl.create_default_context()
+
+            # Token anonyme GHCR
+            token_url = f"https://{registry}/token?scope=repository:{repo}:pull"
+            with urllib.request.urlopen(urllib.request.Request(token_url), timeout=5, context=ctx) as resp:
+                token = json.loads(resp.read()).get("token", "")
+
+            # Digest remote via manifest
+            manifest_url = f"https://{registry}/v2/{repo}/manifests/{tag}"
+            req = urllib.request.Request(manifest_url)
+            req.add_header("Authorization", f"Bearer {token}")
+            req.add_header("Accept", "application/vnd.oci.image.index.v1+json")
+            with urllib.request.urlopen(req, timeout=5, context=ctx) as resp:
+                remote_digest = resp.headers.get("Docker-Content-Digest", "")
+
+            if not remote_digest:
+                return None
+
+            return local_digest != remote_digest
+
+        except Exception:
+            return None
+
     def remove_image(self, image: str, force: bool = False) -> bool:
         try:
             try:
