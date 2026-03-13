@@ -81,6 +81,14 @@ class NihilController:
         return 0
 
     def _cmd_start(self, args) -> int:
+        _NOT_CHECKED = object()
+        _update_cache = [_NOT_CHECKED]
+
+        def get_update(c):
+            if _update_cache[0] is _NOT_CHECKED:
+                _update_cache[0] = self._check_image_update(c) if self.config.auto_check_updates else None
+            return _update_cache[0]
+
         container_name = args.name
         # Appliquer les defaults de config pour les options non spécifiées par l'utilisateur
         if args.network is None:
@@ -107,7 +115,7 @@ class NihilController:
             env_list = container.attrs.get("Config", {}).get("Env") or []
             delay_info = not args.no_shell and any(e == "NIHIL_BROWSER_UI=1" for e in env_list)
             if not delay_info:
-                self._print_container_info(container, args, created=False)
+                self._print_container_info(container, args, created=False, update_available=get_update(container))
         else:
             print(self.formatter.info(f"Container '{container_name}' doesn't exist. Creating..."))
             network_map = {"host": "host", "disabled": "none", "docker": "bridge", "nat": "bridge"}
@@ -177,7 +185,7 @@ class NihilController:
             self.manager.start_container(container)
             print(self.formatter.success(f"Container '{container_name}' created and started successfully."))
             if not (browser_ui_enabled and not args.no_shell):
-                self._print_container_info(container, args, created=True)
+                self._print_container_info(container, args, created=True, update_available=get_update(container))
         if not args.no_shell:
             command = "zsh"
             vpn_path = getattr(args, "vpn", None)
@@ -226,12 +234,25 @@ class NihilController:
                 else:
                     print(self.formatter.warning("Browser UI may still be starting; open the link from the recap when ready."))
                 session_str = browser_ui_get_session_str(container, container_name)
-                self._print_container_info(container, args, created=not container_existed, browser_ui_session=session_str)
+                self._print_container_info(container, args, created=not container_existed, browser_ui_session=session_str, update_available=get_update(container))
             print(self.formatter.info(f"Connecting to container '{container_name}'..."))
             self.manager.exec_in_container(container, command)
         return 0
 
-    def _print_container_info(self, container, args, created: bool = False, browser_ui_session: Optional[str] = None) -> None:
+    def _check_image_update(self, container) -> Optional[bool]:
+        """Lance le check de mise à jour dans un thread avec timeout de 5s."""
+        import concurrent.futures
+        try:
+            image_tag = container.image.tags[0] if container.image.tags else None
+            if not image_tag:
+                return None
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(self.manager.check_image_update, image_tag)
+                return future.result(timeout=5)
+        except Exception:
+            return None
+
+    def _print_container_info(self, container, args, created: bool = False, browser_ui_session: Optional[str] = None, update_available: Optional[bool] = None) -> None:
         try:
             from rich.console import Console
             from rich.panel import Panel
@@ -326,7 +347,12 @@ class NihilController:
                 table.add_row("Session (browser)", f"[green]{browser_ui_session}[/]")
             else:
                 table.add_row("Session (browser)", "[dim](see browser page)[/]")
+        if update_available is True:
+            table.add_row("Image update", "[yellow]Update available[/] → run [bold cyan]nihil update[/]")
+        elif update_available is False:
+            table.add_row("Image update", "[green]Up to date[/]")
         title = "New container" if created else "Container"
+        self.formatter.print_docs_hint()
         Console().print(Panel(table, title=f"[bold]{title}[/]", border_style="blue", padding=(0, 1)))
 
     def _cmd_stop(self, args) -> int:
