@@ -28,6 +28,10 @@ Examples:
   nihil uninstall                      Remove default image
   nihil update                         Update all installed images
   nihil update ad                      Update the ad image only
+  nihil upgrade                        Upgrade all nihil containers (interactive)
+  nihil upgrade pentest                Upgrade a specific container
+  nihil upgrade pentest ctf            Upgrade multiple containers
+
         """
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -46,7 +50,7 @@ Examples:
     start_parser.add_argument("name", help="Container name")
     start_parser.add_argument("--privileged", action="store_true", help="Privileged mode")
     start_parser.add_argument("--network", choices=["docker", "host", "disabled", "nat"], default=None, help="Network mode (default: from config, fallback: host)")
-    start_parser.add_argument("--image", choices=["base", "ad", "active-directory", "web"], default=None, help="Image variant to use. If not specified, you will be prompted to select one.")
+    start_parser.add_argument("--image", choices=["base", "ad", "web"], default=None, help="Image variant to use. If not specified, you will be prompted to select one.")
     start_parser.add_argument("--workspace", help="Workspace path to mount")
     start_parser.add_argument("--workspace-here", action="store_true", help="Mount the current working directory as /workspace inside the container.")
     start_parser.add_argument("--vpn", metavar="FILE", default=None, help="Path to OpenVPN config file (.ovpn). Starts the container with VPN; VPN stops when you exit the container.")
@@ -66,14 +70,18 @@ Examples:
     remove_parser.add_argument("--force", "-f", action="store_true", help="Force removal")
 
     install_parser = subparsers.add_parser("install", help="Install or update nihil images")
-    install_parser.add_argument("image", choices=["base", "ad", "active-directory", "web"], nargs="?", default=None, help="Image variant to install. If not specified, prompted to select.")
+    install_parser.add_argument("image", choices=["base", "ad", "web"], nargs="?", default=None, help="Image variant to install. If not specified, prompted to select.")
 
     uninstall_parser = subparsers.add_parser("uninstall", help="Remove nihil images")
     uninstall_parser.add_argument("names", nargs="*", help="Image name(s)")
     uninstall_parser.add_argument("--force", "-f", action="store_true", help="Force removal")
 
     update_parser = subparsers.add_parser("update", help="Update installed nihil images")
-    update_parser.add_argument("image", choices=["base", "ad", "active-directory", "web"], nargs="?", default=None, help="Image variant to update. If not specified, all installed images are updated.")
+    update_parser.add_argument("image", choices=["base", "ad", "web"], nargs="?", default=None, help="Image variant to update. If not specified, all installed images are updated.")
+
+    upgrade_parser = subparsers.add_parser("upgrade", help="Upgrade one or more containers to the latest image version")
+    upgrade_parser.add_argument("names", nargs="*", help="Container name(s) to upgrade. If not specified, prompted to select.")
+    upgrade_parser.add_argument("--force", "-f", action="store_true", help="Force upgrade/recreation even if image is already up to date")
 
     exec_parser = subparsers.add_parser("exec", help="Execute a command in a container")
     exec_parser.add_argument("name", help="Container name")
