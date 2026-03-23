@@ -76,6 +76,8 @@ class NihilController:
             return self._cmd_install(parsed_args)
         elif parsed_args.command == "uninstall":
             return self._cmd_uninstall(parsed_args)
+        elif parsed_args.command == "tools":
+            return self._cmd_tools(parsed_args)
         elif parsed_args.command == "completion":
             return self._cmd_completion(parsed_args)
         return 0
@@ -615,6 +617,43 @@ class NihilController:
                 print(self.formatter.error(str(e)), file=sys.stderr)
                 errors += 1
         return 1 if errors > 0 else 0
+
+    def _cmd_tools(self, args) -> int:
+        from nihil.features.images import AVAILABLE_IMAGES
+        image_key = args.image or "base"
+        image_tag = AVAILABLE_IMAGES.get(image_key)
+        if not image_tag:
+            print(self.formatter.error(f"Unknown image variant: {image_key}"), file=sys.stderr)
+            return 1
+
+        short_name = self.manager.short_image_name(image_tag)
+        print(self.formatter.info(f"Reading tools manifest from {short_name} ({image_tag})..."))
+
+        manifest = self.manager.get_tools_manifest(image_tag)
+        if not manifest:
+            print(self.formatter.error("Could not read tools.json from image. Is the image installed?"), file=sys.stderr)
+            return 1
+
+        category_filter = getattr(args, "category", None)
+        total = 0
+
+        for category, tools in manifest.items():
+            if category_filter and category != category_filter:
+                continue
+            if not tools:
+                continue
+
+            print()
+            print(self.formatter.section_header(category.upper().replace("_", " "), ""))
+            rows = []
+            for tool in tools:
+                rows.append([tool["name"], tool.get("cmd") or "-", tool.get("description", "")])
+                total += 1
+            self.formatter.print_table(["TOOL", "COMMAND", "DESCRIPTION"], rows)
+
+        print()
+        print(self.formatter.info(f"{total} tools available in {short_name}"))
+        return 0
 
     def _cmd_images(self) -> int:
         print(self.formatter.section_header("AVAILABLE IMAGE VARIANTS", "📦 "))
