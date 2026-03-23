@@ -3,21 +3,20 @@
 """Registre d’images Nihil (variantes, noms courts pour l’affichage)."""
 
 # Image par défaut
-DEFAULT_IMAGE = "ghcr.io/thenullpigeons/nihil-images:latest"
+DEFAULT_IMAGE = "ghcr.io/thenullpigeons/nihil:base"
 
 # Variantes : nom court -> tag complet
 AVAILABLE_IMAGES = {
-    "base": "ghcr.io/thenullpigeons/nihil-images:latest",
-    "ad": "ghcr.io/thenullpigeons/nihil-images-ad:latest",
-    "active-directory": "ghcr.io/thenullpigeons/nihil-images-ad:latest",
-    "web": "ghcr.io/thenullpigeons/nihil-images-web:latest",
+    "base": "ghcr.io/thenullpigeons/nihil:base",
+    "ad": "ghcr.io/thenullpigeons/nihil:ad",
+    "web": "ghcr.io/thenullpigeons/nihil:web",
 }
 
 # Tag complet -> nom d’affichage compact
 SHORT_NAMES = {
-    "ghcr.io/thenullpigeons/nihil-images:latest": "nihil",
-    "ghcr.io/thenullpigeons/nihil-images-ad:latest": "nihil-ad",
-    "ghcr.io/thenullpigeons/nihil-images-web:latest": "nihil-web",
+    "ghcr.io/thenullpigeons/nihil:base": "base",
+    "ghcr.io/thenullpigeons/nihil:ad": "ad",
+    "ghcr.io/thenullpigeons/nihil:web": "web",
 }
 
 
