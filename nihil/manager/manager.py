@@ -317,6 +317,27 @@ class NihilManager:
             print(f"Error retrieving images: {e}", file=sys.stderr)
             return []
 
+    def get_tools_manifest(self, image_tag: str) -> Optional[Dict]:
+        """Extract tools.json from a nihil image."""
+        import json
+        try:
+            container = self.client.containers.create(image_tag, command="true")
+            try:
+                bits, _ = container.get_archive("/opt/nihil/build/config/tools.json")
+                buf = io.BytesIO()
+                for chunk in bits:
+                    buf.write(chunk)
+                buf.seek(0)
+                with tarfile.open(fileobj=buf, mode="r") as tar:
+                    member = tar.getmembers()[0]
+                    f = tar.extractfile(member)
+                    if f:
+                        return json.loads(f.read().decode("utf-8"))
+            finally:
+                container.remove(force=True)
+        except Exception:
+            return None
+
     def get_image_info(self, image_tag: str) -> Optional[Dict]:
         try:
             img = self.client.images.get(image_tag)

@@ -79,6 +79,10 @@ Examples:
     exec_parser.add_argument("name", help="Container name")
     exec_parser.add_argument("command", nargs="*", help="Command to execute (default: zsh)")
 
+    tools_parser = subparsers.add_parser("tools", help="List tools available in a nihil image")
+    tools_parser.add_argument("image", choices=["base", "ad", "active-directory", "web"], nargs="?", default=None, help="Image variant (default: base)")
+    tools_parser.add_argument("--category", "-c", default=None, help="Filter by category (e.g. redteam_ad, redteam_web)")
+
     config_parser = subparsers.add_parser("config", help="Show or edit the Nihil configuration file")
     config_parser.add_argument("--edit", "-e", action="store_true", help="Open the config file in $EDITOR")
 
