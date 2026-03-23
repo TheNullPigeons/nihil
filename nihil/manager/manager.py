@@ -425,6 +425,123 @@ class NihilManager:
         except Exception:
             return None
 
+    def snapshot_container_config(self, container) -> Dict:
+        """Extrait la configuration complète d'un container pour pouvoir le recréer à l'identique."""
+        attrs = container.attrs
+        host_config = attrs.get("HostConfig") or {}
+        config = attrs.get("Config") or {}
+
+        # Image
+        image_tag = container.image.tags[0] if container.image.tags else config.get("Image", self.DEFAULT_IMAGE)
+
+        # Volumes / mounts
+        volumes: Dict = {}
+        for mount in attrs.get("Mounts") or []:
+            if mount.get("Type") == "bind":
+                src = mount.get("Source", "")
+                dst = mount.get("Destination", "")
+                mode = mount.get("Mode", "rw") or "rw"
+                if src and dst:
+                    volumes[src] = {"bind": dst, "mode": mode}
+
+        # Env
+        env_list = config.get("Env") or []
+        environment: Dict = {}
+        for kv in env_list:
+            if "=" in kv:
+                k, v = kv.split("=", 1)
+                environment[k] = v
+
+        # Ports
+        port_bindings = host_config.get("PortBindings") or {}
+        ports: Dict = {}
+        for container_port, bindings in port_bindings.items():
+            if bindings:
+                binding = bindings[0]
+                host_ip = binding.get("HostIp", "127.0.0.1") or "127.0.0.1"
+                host_port = int(binding.get("HostPort", 0))
+                ports[container_port] = (host_ip, host_port)
+
+        # Devices
+        devices = [d.get("PathOnHost") for d in (host_config.get("Devices") or []) if d.get("PathOnHost")]
+
+        return {
+            "name": container.name,
+            "image": image_tag,
+            "privileged": bool(host_config.get("Privileged")),
+            "network_mode": host_config.get("NetworkMode") or "host",
+            "volumes": volumes,
+            "environment": environment,
+            "ports": ports,
+            "cap_add": host_config.get("CapAdd") or [],
+            "devices": devices,
+            "hostname": config.get("Hostname") or container.name,
+        }
+
+    def recreate_container(self, snapshot: Dict):
+        """Recrée un container à partir d'un snapshot de configuration."""
+        container_config = {
+            "name": snapshot["name"],
+            "image": snapshot["image"],
+            "detach": True,
+            "tty": True,
+            "stdin_open": True,
+            "privileged": snapshot["privileged"],
+            "hostname": snapshot.get("hostname", snapshot["name"]),
+        }
+        if snapshot["volumes"]:
+            container_config["volumes"] = snapshot["volumes"]
+        if snapshot["network_mode"]:
+            container_config["network_mode"] = snapshot["network_mode"]
+        if snapshot["environment"]:
+            container_config["environment"] = snapshot["environment"]
+        if snapshot["ports"]:
+            container_config["ports"] = snapshot["ports"]
+        if snapshot["cap_add"]:
+            container_config["cap_add"] = snapshot["cap_add"]
+        if snapshot["devices"]:
+            container_config["devices"] = snapshot["devices"]
+        try:
+            container = self.client.containers.create(**container_config)
+            return container
+        except docker.errors.APIError as e:
+            raise ContainerCreateFailed(name=snapshot["name"], message=f"Erreur recréation conteneur: {e}")
+
+    def extract_container_data(self, container, paths: list[str]) -> dict:
+        """Récupère une archive tar pour chaque chemin spécifié depuis le container (si existant)."""
+        data = {}
+        for path in paths:
+            try:
+                stream, _ = container.get_archive(path)
+                data[path] = b"".join(chunk for chunk in stream)
+            except Exception:
+                pass  # Le fichier ou dossier n'existe pas, on l'ignore
+        return data
+
+    def restore_container_data(self, container, data: dict):
+        """Réinjecte les archives tar sauvegardées dans le nouveau container."""
+        import os
+        for path, tar_bytes in data.items():
+            parent_dir = os.path.dirname(path)
+            try:
+                self.exec_in_container(container, f"mkdir -p \"{parent_dir}\"")
+                if path in ["/etc/hosts", "/etc/resolv.conf"]:
+                    import tarfile
+                    import io
+                    with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r") as tar:
+                        members = tar.getmembers()
+                        if members:
+                            filename = members[0].name
+                            container.put_archive("/tmp", tar_bytes)
+                            self.exec_in_container(container, f"sh -c 'cat \"/tmp/{filename}\" > \"{path}\"'")
+                else:
+                    container.put_archive(parent_dir, tar_bytes)
+            except Exception as e:
+                pass
+
+
+
+
     def remove_image(self, image: str, force: bool = False) -> bool:
         try:
             try:
