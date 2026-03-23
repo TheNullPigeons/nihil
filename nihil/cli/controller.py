@@ -76,6 +76,8 @@ class NihilController:
             return self._cmd_install(parsed_args)
         elif parsed_args.command == "uninstall":
             return self._cmd_uninstall(parsed_args)
+        elif parsed_args.command == "upgrade":
+            return self._cmd_upgrade(parsed_args)
         elif parsed_args.command == "tools":
             return self._cmd_tools(parsed_args)
         elif parsed_args.command == "completion":
@@ -127,11 +129,11 @@ class NihilController:
                 from rich.prompt import IntPrompt
                 console = Console()
                 print(self.formatter.info("No image specified. Please select one:"))
-                variants = [v for v in self.manager.AVAILABLE_IMAGES.keys() if v != "active-directory"]
+                variants = list(self.manager.AVAILABLE_IMAGES.keys())
                 rows = []
                 for i, variant in enumerate(variants):
                     desc = "Base image"
-                    if "ad" in variant or "active-directory" in variant:
+                    if "ad" in variant:
                         desc = "Active Directory tools"
                     elif "web" in variant:
                         desc = "Web Hacking tools"
@@ -159,6 +161,17 @@ class NihilController:
             workspace_path = args.workspace
             if workspace_path is None and getattr(args, "workspace_here", False):
                 workspace_path = os.getcwd()
+            
+            # Utiliser le default de la config, ou créer un propre au container par défaut
+            if workspace_path is None:
+                if getattr(self.config, "default_workspace", None):
+                    workspace_path = str(self.config.default_workspace)
+                else:
+                    from nihil.config.defaults import NIHIL_HOME
+                    default_ws = NIHIL_HOME / "workspaces" / container_name
+                    default_ws.mkdir(parents=True, exist_ok=True)
+                    workspace_path = str(default_ws)
+
             if workspace_path is not None:
                 workspace_path = str(Path(workspace_path).expanduser().resolve())
             browser_ui_enabled = getattr(args, "browser_ui", False)
@@ -453,7 +466,7 @@ class NihilController:
             if not installed:
                 print(self.formatter.warning("No nihil images installed locally. Use 'nihil install' first."))
                 return 0
-            reverse_map = {v: k for k, v in self.manager.AVAILABLE_IMAGES.items() if k != "active-directory"}
+            reverse_map = {v: k for k, v in self.manager.AVAILABLE_IMAGES.items()}
             variants_to_update = []
             for img in installed:
                 for tag in img.tags:
@@ -465,18 +478,29 @@ class NihilController:
                 return 0
 
         errors = 0
+        containers_to_upgrade: List[str] = []
+
         for variant in variants_to_update:
             image_tag = self.manager.AVAILABLE_IMAGES.get(variant)
             if not image_tag:
                 print(self.formatter.error(f"Unknown image variant: {variant}"))
                 errors += 1
                 continue
+
+            # Identifier les containers utilisant actuellement cette image (avant pull)
             old_id = None
+            affected_containers: List[str] = []
             try:
                 old_img = self.manager.client.images.get(image_tag)
                 old_id = old_img.short_id
+                # Containers utilisant cette image (running ou stopped)
+                all_containers = self.manager.client.containers.list(all=True)
+                for c in all_containers:
+                    if c.image.id == old_img.id and any("nihil" in (t or "") for t in (c.image.tags or [c.attrs.get("Config", {}).get("Image", "")])):
+                        affected_containers.append(c.name)
             except Exception:
                 pass
+
             print(self.formatter.info(f"Updating '{variant}' ({image_tag})..."))
             try:
                 self.manager._pull_with_progress(image_tag)
@@ -486,9 +510,174 @@ class NihilController:
                     print(self.formatter.info(f"'{variant}' is already up to date."))
                 else:
                     print(self.formatter.success(f"'{variant}' updated successfully."))
+                    # Si des containers utilisaient l'ancienne image, ils sont maintenant sur une image dangling
+                    if affected_containers:
+                        containers_to_upgrade.extend(affected_containers)
             except Exception as e:
                 print(self.formatter.error(f"Failed to update '{variant}': {e}"))
                 errors += 1
+
+        # Avertir l'utilisateur si des containers ont perdu leur tag
+        if containers_to_upgrade:
+            print()
+            print(self.formatter.warning(
+                f"The following container(s) are still using the old image (now untagged): "
+                f"{', '.join(containers_to_upgrade)}"
+            ))
+            print(self.formatter.warning(
+                "Run 'nihil upgrade' to recreate them with the new image:"
+            ))
+            print(f"    nihil upgrade {' '.join(containers_to_upgrade)}")
+
+        return 1 if errors > 0 else 0
+
+
+    def _cmd_upgrade(self, args) -> int:
+        """Met à jour l'image d'un ou plusieurs containers et les recrée à l'identique."""
+        container_names: List[str] = getattr(args, "names", []) or []
+
+        # Si aucun nom fourni → sélection interactive parmi les containers nihil
+        if not container_names:
+            from rich.prompt import Prompt
+            nihil_containers = self.manager.list_containers(all=True)
+            if not nihil_containers:
+                print(self.formatter.warning("No nihil containers found."))
+                return 0
+            rows = []
+            for c in nihil_containers:
+                status = c.status.capitalize()
+                image_tag = c.image.tags[0] if c.image.tags else c.attrs["Config"]["Image"]
+                rows.append([c.name, status, self.manager.short_image_name(image_tag)])
+            print(self.formatter.section_header("NIHIL CONTAINERS", "🐳 "))
+            self.formatter.print_table(["NAME", "STATUS", "IMAGE"], rows)
+            selected: List[str] = []
+            while True:
+                available = [c.name for c in nihil_containers if c.name not in selected]
+                if not available:
+                    break
+                try:
+                    choice = Prompt.ask(
+                        "[?] Select a container to upgrade",
+                        choices=available,
+                        default=available[0],
+                    )
+                    selected.append(choice)
+                    remaining = [n for n in available if n != choice]
+                    if not remaining:
+                        break
+                    more = Prompt.ask("[?] Add another container?", choices=["y", "n"], default="n")
+                    if more != "y":
+                        break
+                except (KeyboardInterrupt, EOFError):
+                    print("\nAborted.")
+                    return 0
+            if not selected:
+                print("No container selected.")
+                return 0
+            container_names = selected
+
+        errors = 0
+        for container_name in container_names:
+            print()
+            print(self.formatter.section_header(f"UPGRADING '{container_name}'", "⬆️  "))
+
+            # 1. Récupérer le container
+            container = self.manager.get_container(container_name)
+            if not container:
+                print(self.formatter.error(f"Container '{container_name}' not found."))
+                errors += 1
+                continue
+
+            # 2. Snapshot de la config
+            snapshot = self.manager.snapshot_container_config(container)
+            image_tag = snapshot["image"]
+            
+            # Normaliser vers latest pour nihil-images
+            if "nihil-images" in image_tag and ":" in image_tag:
+                repo = image_tag.split(":")[0]
+                target_image = f"{repo}:latest"
+            elif "nihil-images" in image_tag:
+                target_image = f"{image_tag}:latest"
+            else:
+                target_image = image_tag
+
+            snapshot["image"] = target_image
+
+            print(self.formatter.info(f"Container image: {self.manager.short_image_name(image_tag)} ({image_tag})"))
+            if target_image != image_tag:
+                print(self.formatter.info(f"Targeting image: {target_image}"))
+
+            # 3. Pull la nouvelle image
+            old_id = None
+            try:
+                old_img = self.manager.client.images.get(image_tag)
+                old_id = old_img.short_id
+            except Exception:
+                pass
+            print(self.formatter.info("Pulling latest image..."))
+            try:
+                self.manager._pull_with_progress(target_image)
+            except Exception as e:
+                print(self.formatter.error(f"Failed to pull image '{target_image}': {e}"))
+                errors += 1
+                continue
+
+            new_id = None
+            try:
+                new_img = self.manager.client.images.get(target_image)
+                new_id = new_img.short_id
+            except Exception:
+                pass
+
+            force_upgrade = getattr(args, "force", False)
+            if old_id and old_id == new_id and image_tag == target_image and not force_upgrade:
+                print(self.formatter.info("Image is already up to date. Skipping container recreation. Use --force to recreate anyway."))
+                continue
+
+            print(self.formatter.info("Backing up container specific files..."))
+            paths_to_preserve = [
+                "/root/.bash_history",
+                "/root/.zsh_history",
+                "/root/.python_history",
+                "/root/.nxc",
+                "/root/.cme",
+                "/usr/share/responder/Responder.db",
+                "/usr/share/responder/Responder.conf",
+                "/root/.hashcat/hashcat.potfile",
+                "/root/.john/john.pot",
+                "/etc/hosts",
+                "/etc/resolv.conf",
+                "/opt/tools/Exegol-history/profile.sh",
+                "/etc/proxychains.conf",
+                "/etc/proxychains4.conf"
+            ]
+            saved_files = self.manager.extract_container_data(container, paths_to_preserve)
+
+            # 4. Stopper + supprimer l'ancien container
+            if container.status == "running":
+                print(self.formatter.info(f"Stopping container '{container_name}'..."))
+                self.manager.stop_container(container)
+            print(self.formatter.info(f"Removing old container '{container_name}'..."))
+            self.manager.remove_container(container, force=True)
+
+            # 5. Recréer + démarrer le container
+            print(self.formatter.info(f"Recreating container '{container_name}'..."))
+            try:
+                new_container = self.manager.recreate_container(snapshot)
+                self.manager.start_container(new_container)
+                
+                if saved_files:
+                    print(self.formatter.info("Restoring container specific files..."))
+                    self.manager.restore_container_data(new_container, saved_files)
+
+                print(self.formatter.success(
+                    f"Container '{container_name}' upgraded and restarted successfully "
+                    f"({old_id or '?'} → {new_id or '?'})."
+                ))
+            except Exception as e:
+                print(self.formatter.error(f"Failed to recreate container '{container_name}': {e}"))
+                errors += 1
+
         return 1 if errors > 0 else 0
 
     def _cmd_install(self, args) -> int:
@@ -498,7 +687,7 @@ class NihilController:
             from rich.console import Console
             console = Console()
             print(self.formatter.info("Select an image to install/update:"))
-            variants = [v for v in self.manager.AVAILABLE_IMAGES.keys() if v != "active-directory"]
+            variants = list(self.manager.AVAILABLE_IMAGES.keys())
             rows = []
             for i, variant in enumerate(variants):
                 rows.append([str(i+1), variant, self.manager.AVAILABLE_IMAGES[variant]])
@@ -553,10 +742,6 @@ class NihilController:
             for item in raw_images:
                 if item in self.manager.AVAILABLE_IMAGES:
                     resolved_images.append(self.manager.AVAILABLE_IMAGES[item])
-                elif item in ["nihil-ad", "nihil-ad:latest"]:
-                    resolved_images.append(self.manager.AVAILABLE_IMAGES.get("ad"))
-                elif item in ["nihil", "nihil:latest"]:
-                    resolved_images.append(self.manager.AVAILABLE_IMAGES.get("base"))
                 else:
                     resolved_images.append(item)
         images = resolved_images
@@ -664,11 +849,11 @@ class NihilController:
             "web": "Web / HTTP tools (base + web tools)",
         }
         for variant, image_url in self.manager.AVAILABLE_IMAGES.items():
-            if variant == "active-directory":
-                continue
             description = variant_descriptions.get(variant, "Specialized image")
-            rows.append([variant, self.manager.short_image_name(image_url), description])
-        self.formatter.print_table(["VARIANT", "IMAGE", "DESCRIPTION"], rows)
+            info = self.manager.get_image_info(image_url)
+            size_str = f"{info['size_bytes'] / (1024**3):.2f} GB" if info else "-"
+            rows.append([variant, self.manager.short_image_name(image_url), size_str, description])
+        self.formatter.print_table(["VARIANT", "IMAGE", "SIZE", "DESCRIPTION"], rows)
         print()
         print(self.formatter.info("Usage: nihil start <name> --image <variant>"))
         return 0
@@ -692,11 +877,11 @@ class NihilController:
         print(self.formatter.section_header("AVAILABLE IMAGE VARIANTS", "📦 "))
         rows = []
         for variant, image_url in self.manager.AVAILABLE_IMAGES.items():
-            if variant == "active-directory":
-                continue
             description = variant_descriptions.get(variant, "Specialized image")
-            rows.append([variant, self.manager.short_image_name(image_url), description])
-        self.formatter.print_table(["VARIANT", "IMAGE", "DESCRIPTION"], rows)
+            info = self.manager.get_image_info(image_url)
+            size_str = f"{info['size_bytes'] / (1024**3):.2f} GB" if info else "-"
+            rows.append([variant, self.manager.short_image_name(image_url), size_str, description])
+        self.formatter.print_table(["VARIANT", "IMAGE", "SIZE", "DESCRIPTION"], rows)
         print()
         print(self.formatter.info("Use 'nihil start <name> --image <variant>' to create a container with a specific image."))
         print()
