@@ -52,37 +52,30 @@ class TestNihilManager:
                 mock_docker_client.images.get.assert_called_once_with("test-image:latest")
     
     def test_ensure_image_exists_pull_success(self, mock_docker_client, mock_formatter):
-        """Test ensure_image_exists quand il faut pull l'image (manager utilise client.api.pull)."""
+        """Test ensure_image_exists quand il faut pull l'image (manager utilise _pull_with_progress)."""
         mock_docker_client.images.get.side_effect = docker.errors.ImageNotFound("Not found")
-        # _pull_with_progress fait: for event in self.client.api.pull(image, stream=True, decode=True)
-        mock_docker_client.api.pull.return_value = iter([{"id": "layer1", "status": "Pull complete"}])
         
         with patch('nihil.manager.manager.docker.from_env', return_value=mock_docker_client):
             with patch('nihil.manager.manager.ensure_filesystem'):
                 with patch('builtins.print'):
-                    manager = NihilManager()
-                    result = manager.ensure_image_exists("test-image:latest")
-                    
-                    assert result is True
-                    mock_docker_client.api.pull.assert_called_once_with(
-                        "test-image:latest", stream=True, decode=True
-                    )
+                    with patch.object(NihilManager, '_pull_with_progress') as mock_pull:
+                        manager = NihilManager()
+                        result = manager.ensure_image_exists("test-image:latest")
+                        
+                        assert result is True
+                        mock_pull.assert_called_once_with("test-image:latest")
     
     def test_ensure_image_exists_pull_fails(self, mock_docker_client):
-        """Test ensure_image_exists quand le pull échoue (manager utilise client.api.pull)."""
+        """Test ensure_image_exists quand le pull échoue (manager utilise _pull_with_progress)."""
         mock_docker_client.images.get.side_effect = docker.errors.ImageNotFound("Not found")
-        mock_response = MagicMock()
-        mock_response.status_code = 500
-        mock_docker_client.api.pull.side_effect = docker.errors.APIError(
-            "Pull failed", response=mock_response
-        )
         
         with patch('nihil.manager.manager.docker.from_env', return_value=mock_docker_client):
             with patch('nihil.manager.manager.ensure_filesystem'):
                 with patch('builtins.print'):
-                    manager = NihilManager()
-                    with pytest.raises(ImagePullFailed):
-                        manager.ensure_image_exists("test-image:latest")
+                    with patch.object(NihilManager, '_pull_with_progress', side_effect=ImagePullFailed(image="test-image:latest", message="Pull error")):
+                        manager = NihilManager()
+                        with pytest.raises(ImagePullFailed):
+                            manager.ensure_image_exists("test-image:latest")
     
     def test_create_container_config_defaults(self, mock_docker_client):
         """Test création de container avec valeurs par défaut"""
@@ -170,8 +163,8 @@ class TestNihilManager:
         """Test list_containers filtre correctement les conteneurs nihil"""
         # Créer des mocks de conteneurs
         nihil_container = MagicMock()
-        nihil_container.image.tags = ["ghcr.io/thenullpigeons/nihil-images:latest"]
-        nihil_container.attrs = {"Config": {"Image": "nihil-images:latest"}}
+        nihil_container.image.tags = ["ghcr.io/thenullpigeons/nihil:base"]
+        nihil_container.attrs = {"Config": {"Image": "ghcr.io/thenullpigeons/nihil:base"}}
         
         other_container = MagicMock()
         other_container.image.tags = ["ubuntu:latest"]
@@ -191,7 +184,7 @@ class TestNihilManager:
         """Test list_containers filtre par Config.Image même sans tags"""
         nihil_container = MagicMock()
         nihil_container.image.tags = []  # Pas de tags (image supprimée)
-        nihil_container.attrs = {"Config": {"Image": "nihil-images:latest"}}
+        nihil_container.attrs = {"Config": {"Image": "ghcr.io/thenullpigeons/nihil:base"}}
         
         mock_docker_client.containers.list.return_value = [nihil_container]
         
