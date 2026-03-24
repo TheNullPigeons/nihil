@@ -81,9 +81,9 @@ class TestCreateParser:
 
     def test_parse_install(self):
         parser = create_parser()
-        args = parser.parse_args(["install", "base"])
+        args = parser.parse_args(["install", "full"])
         assert args.command == "install"
-        assert args.image == "base"
+        assert args.image == "full"
 
     def test_parse_doctor(self):
         parser = create_parser()
