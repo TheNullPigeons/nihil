@@ -88,8 +88,8 @@ class NihilDoctor:
         out: List[DoctorCheckResult] = []
         unique_images: dict[str, str] = {}
         for label, image in manager.AVAILABLE_IMAGES.items():
-            if image == manager.DEFAULT_IMAGE and "base" in manager.AVAILABLE_IMAGES:
-                display = f"Image 'base' ({image})"
+            if image == manager.DEFAULT_IMAGE and "full" in manager.AVAILABLE_IMAGES:
+                display = f"Image 'full' ({image})"
             else:
                 display = f"Image '{label}' ({image})"
             unique_images[image] = display
