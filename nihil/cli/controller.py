@@ -132,7 +132,7 @@ class NihilController:
                 variants = list(self.manager.AVAILABLE_IMAGES.keys())
                 rows = []
                 for i, variant in enumerate(variants):
-                    desc = "Base image"
+                    desc = "The whole flock"
                     if "ad" in variant:
                         desc = "Active Directory tools"
                     elif "web" in variant:
@@ -742,6 +742,10 @@ class NihilController:
             for item in raw_images:
                 if item in self.manager.AVAILABLE_IMAGES:
                     resolved_images.append(self.manager.AVAILABLE_IMAGES[item])
+                elif item in ["nihil-ad", "nihil-ad:latest"]:
+                    resolved_images.append(self.manager.AVAILABLE_IMAGES.get("ad"))
+                elif item in ["nihil", "nihil:latest"]:
+                    resolved_images.append(self.manager.AVAILABLE_IMAGES.get("full"))
                 else:
                     resolved_images.append(item)
         images = resolved_images
@@ -805,7 +809,7 @@ class NihilController:
 
     def _cmd_tools(self, args) -> int:
         from nihil.features.images import AVAILABLE_IMAGES
-        image_key = args.image or "base"
+        image_key = args.image or "full"
         image_tag = AVAILABLE_IMAGES.get(image_key)
         if not image_tag:
             print(self.formatter.error(f"Unknown image variant: {image_key}"), file=sys.stderr)
@@ -844,9 +848,9 @@ class NihilController:
         print(self.formatter.section_header("AVAILABLE IMAGE VARIANTS", "📦 "))
         rows = []
         variant_descriptions = {
-            "base": "Base image (OS + core tools)",
-            "ad": "Active Directory tools (base + AD tools)",
-            "web": "Web / HTTP tools (base + web tools)",
+            "full": "The whole flock — every tool, every module",
+            "ad": "Nest in their Active Directory",
+            "web": "Beak through their web apps",
         }
         for variant, image_url in self.manager.AVAILABLE_IMAGES.items():
             description = variant_descriptions.get(variant, "Specialized image")
@@ -870,9 +874,9 @@ class NihilController:
             return 0
         print(self.formatter.info(f"Nihil version {__version__}\n"))
         variant_descriptions = {
-            "base": "Base image (OS + core tools)",
-            "ad": "Active Directory tools (base + AD tools)",
-            "web": "Web / HTTP tools (base + web tools)",
+            "full": "The whole flock — every tool, every module",
+            "ad": "Nest in their Active Directory",
+            "web": "Beak through their web apps",
         }
         print(self.formatter.section_header("AVAILABLE IMAGE VARIANTS", "📦 "))
         rows = []
@@ -915,7 +919,7 @@ class NihilController:
                 if "/" in image_raw:
                     image = image_raw.split("/")[-1]
                     if image.startswith("nihil-images"):
-                        image = image.replace("nihil-images", "nihil", 1)
+                        image = image.replace("nihil-images-", "", 1).replace("nihil-images", "full", 1)
                 else:
                     image = image_raw
                 is_privileged = c.attrs['HostConfig']['Privileged']

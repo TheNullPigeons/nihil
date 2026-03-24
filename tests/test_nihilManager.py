@@ -163,8 +163,8 @@ class TestNihilManager:
         """Test list_containers filtre correctement les conteneurs nihil"""
         # Créer des mocks de conteneurs
         nihil_container = MagicMock()
-        nihil_container.image.tags = ["ghcr.io/thenullpigeons/nihil:base"]
-        nihil_container.attrs = {"Config": {"Image": "ghcr.io/thenullpigeons/nihil:base"}}
+        nihil_container.image.tags = ["ghcr.io/thenullpigeons/full:latest"]
+        nihil_container.attrs = {"Config": {"Image": "ghcr.io/thenullpigeons/full:latest"}}
         
         other_container = MagicMock()
         other_container.image.tags = ["ubuntu:latest"]
@@ -184,10 +184,10 @@ class TestNihilManager:
         """Test list_containers filtre par Config.Image même sans tags"""
         nihil_container = MagicMock()
         nihil_container.image.tags = []  # Pas de tags (image supprimée)
-        nihil_container.attrs = {"Config": {"Image": "ghcr.io/thenullpigeons/nihil:base"}}
-        
+        nihil_container.attrs = {"Config": {"Image": "ghcr.io/thenullpigeons/full:latest"}}
+
         mock_docker_client.containers.list.return_value = [nihil_container]
-        
+
         with patch('nihil.manager.manager.docker.from_env', return_value=mock_docker_client):
             with patch('nihil.manager.manager.ensure_filesystem'):
                 manager = NihilManager()
