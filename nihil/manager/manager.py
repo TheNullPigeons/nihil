@@ -297,8 +297,9 @@ class NihilManager:
             for c in containers:
                 try:
                     config_image = c.attrs.get('Config', {}).get('Image', '')
-                    has_nihil_tag = c.image.tags and any("nihil" in tag for tag in c.image.tags)
-                    created_from_nihil = "nihil" in config_image.lower()
+                    known_images = set(self.AVAILABLE_IMAGES.values())
+                    has_nihil_tag = c.image.tags and any(tag in known_images or "thenullpigeons" in tag for tag in c.image.tags)
+                    created_from_nihil = "thenullpigeons" in config_image.lower() or "nihil" in config_image.lower()
                     if has_nihil_tag or created_from_nihil:
                         nihil_containers.append(c)
                 except Exception:
@@ -311,7 +312,8 @@ class NihilManager:
     def list_images(self) -> List:
         try:
             images = self.client.images.list()
-            nihil_images = [img for img in images if img.tags and any("nihil" in tag for tag in img.tags)]
+            known_images = set(self.AVAILABLE_IMAGES.values())
+            nihil_images = [img for img in images if img.tags and any(tag in known_images or "thenullpigeons" in tag for tag in img.tags)]
             return nihil_images
         except docker.errors.APIError as e:
             print(f"Error retrieving images: {e}", file=sys.stderr)
