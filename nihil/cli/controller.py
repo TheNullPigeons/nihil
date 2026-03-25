@@ -601,6 +601,10 @@ class NihilController:
             else:
                 target_image = image_tag
 
+            requested_img = getattr(args, "image", None)
+            if requested_img:
+                target_image = self.manager.AVAILABLE_IMAGES.get(requested_img, target_image)
+
             snapshot["image"] = target_image
 
             print(self.formatter.info(f"Container image: {self.manager.short_image_name(image_tag)} ({image_tag})"))
