@@ -137,6 +137,8 @@ class NihilController:
                         desc = "Active Directory tools"
                     elif "web" in variant:
                         desc = "Web Hacking tools"
+                    elif "ctf" in variant:
+                        desc = "Capture The Flag tools"
                     image_tag = self.manager.AVAILABLE_IMAGES[variant]
                     info = self.manager.get_image_info(image_tag)
                     if info:
@@ -814,6 +816,8 @@ class NihilController:
     def _cmd_tools(self, args) -> int:
         from nihil.features.images import AVAILABLE_IMAGES
         image_key = args.image or "full"
+        if image_key == "active-directory":
+            image_key = "ad"
         image_tag = AVAILABLE_IMAGES.get(image_key)
         if not image_tag:
             print(self.formatter.error(f"Unknown image variant: {image_key}"), file=sys.stderr)
@@ -855,6 +859,7 @@ class NihilController:
             "full": "The whole flock — every tool, every module",
             "ad": "Nest in their Active Directory",
             "web": "Beak through their web apps",
+            "ctf": "Capture the flag, no fluff",
         }
         for variant, image_url in self.manager.AVAILABLE_IMAGES.items():
             description = variant_descriptions.get(variant, "Specialized image")
@@ -881,6 +886,7 @@ class NihilController:
             "full": "The whole flock — every tool, every module",
             "ad": "Nest in their Active Directory",
             "web": "Beak through their web apps",
+            "ctf": "Capture the flag, no fluff",
         }
         print(self.formatter.section_header("AVAILABLE IMAGE VARIANTS", "📦 "))
         rows = []

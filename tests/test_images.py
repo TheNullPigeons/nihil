@@ -17,10 +17,11 @@ class TestImagesRegistry:
     def test_default_image(self):
         assert DEFAULT_IMAGE == "ghcr.io/thenullpigeons/full:latest"
 
-    def test_available_images_has_full_ad_web(self):
+    def test_available_images_has_full_ad_web_ctf(self):
         assert "full" in AVAILABLE_IMAGES
         assert "ad" in AVAILABLE_IMAGES
         assert "web" in AVAILABLE_IMAGES
+        assert "ctf" in AVAILABLE_IMAGES
 
     def test_full_and_default_match(self):
         assert AVAILABLE_IMAGES["full"] == DEFAULT_IMAGE
@@ -46,6 +47,12 @@ class TestShortImageName:
 
     def test_known_web_beak_returns_web(self):
         assert short_image_name("ghcr.io/thenullpigeons/web:beak") == "web"
+
+    def test_known_ctf_returns_ctf(self):
+        assert short_image_name("ghcr.io/thenullpigeons/ctf:latest") == "ctf"
+
+    def test_known_ctf_flag_returns_ctf(self):
+        assert short_image_name("ghcr.io/thenullpigeons/ctf:flag") == "ctf"
 
     def test_unknown_with_slash_uses_last_part(self):
         assert short_image_name("registry/foo/bar:v1") == "bar:v1"
