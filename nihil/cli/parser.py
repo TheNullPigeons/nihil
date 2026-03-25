@@ -82,6 +82,7 @@ Examples:
     upgrade_parser = subparsers.add_parser("upgrade", help="Upgrade one or more containers to the latest image version")
     upgrade_parser.add_argument("names", nargs="*", help="Container name(s) to upgrade. If not specified, prompted to select.")
     upgrade_parser.add_argument("--force", "-f", action="store_true", help="Force upgrade/recreation even if image is already up to date")
+    upgrade_parser.add_argument("--image", "-i", choices=["base", "ad", "web"], default=None, help="Change the container's image variant to the specified one during the upgrade.")
 
     exec_parser = subparsers.add_parser("exec", help="Execute a command in a container")
     exec_parser.add_argument("name", help="Container name")
