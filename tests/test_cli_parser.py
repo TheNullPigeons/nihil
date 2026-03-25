@@ -85,6 +85,31 @@ class TestCreateParser:
         assert args.command == "install"
         assert args.image == "full"
 
+    def test_parse_install_ctf(self):
+        parser = create_parser()
+        args = parser.parse_args(["install", "ctf"])
+        assert args.command == "install"
+        assert args.image == "ctf"
+
+    def test_parse_start_image_ctf(self):
+        parser = create_parser()
+        args = parser.parse_args(["start", "lab", "--image", "ctf"])
+        assert args.command == "start"
+        assert args.name == "lab"
+        assert args.image == "ctf"
+
+    def test_parse_update_ctf(self):
+        parser = create_parser()
+        args = parser.parse_args(["update", "ctf"])
+        assert args.command == "update"
+        assert args.image == "ctf"
+
+    def test_parse_tools_ctf(self):
+        parser = create_parser()
+        args = parser.parse_args(["tools", "ctf"])
+        assert args.command == "tools"
+        assert args.image == "ctf"
+
     def test_parse_doctor(self):
         parser = create_parser()
         args = parser.parse_args(["doctor"])

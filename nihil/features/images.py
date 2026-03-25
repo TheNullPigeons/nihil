@@ -10,6 +10,7 @@ AVAILABLE_IMAGES = {
     "full": "ghcr.io/thenullpigeons/full:latest",
     "ad": "ghcr.io/thenullpigeons/ad:latest",
     "web": "ghcr.io/thenullpigeons/web:latest",
+    "ctf": "ghcr.io/thenullpigeons/ctf:latest",
 }
 
 # Tag complet -> nom d’affichage compact
@@ -20,6 +21,8 @@ SHORT_NAMES = {
     "ghcr.io/thenullpigeons/ad:nest": "ad",
     "ghcr.io/thenullpigeons/web:latest": "web",
     "ghcr.io/thenullpigeons/web:beak": "web",
+    "ghcr.io/thenullpigeons/ctf:latest": "ctf",
+    "ghcr.io/thenullpigeons/ctf:flag": "ctf",
 }
 
 
