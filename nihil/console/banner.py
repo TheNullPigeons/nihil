@@ -43,4 +43,4 @@ def get_compact_banner() -> str:
 def print_compact_banner(file: Optional[object] = None) -> None:
     if file is None:
         file = sys.stdout
-    print(get_banner(), file=file, end='')
+    print(get_compact_banner(), file=file, end='')

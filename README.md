@@ -6,6 +6,6 @@ Want to know more? Go to the [project website](https://thenullpigeons.org).
 
 ## Getting started
 
-How to install Nihil: [Get started / install](https://thenullpigeons.org/nihil#install).
+How to install Nihil: [Get started / install](https://thenullpigeons.org/docs/installation/linux).
 
-The project documentation (images, CLI, usage) is available on the [documentation site](https://github.com/TheNullPigeons/nihil/wiki).
+The project documentation (images, CLI, usage) is available on the [documentation site](https://thenullpigeons.org/docs).

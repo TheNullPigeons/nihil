@@ -1,6 +1,6 @@
 [project]
 name = "nihil"
-version = "0.1.0"
+version = "1.0.0"
 description = "Nihil - by 0xbbuddha and Goultarde"
 readme = "README.md"
 requires-python = ">=3.12"
