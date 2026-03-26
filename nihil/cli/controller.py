@@ -178,6 +178,9 @@ class NihilController:
                 workspace_path = str(Path(workspace_path).expanduser().resolve())
             browser_ui_enabled = getattr(args, "browser_ui", False)
             browser_ui_port = getattr(args, "browser_ui_port", None)
+            if browser_ui_port is not None and not (1 <= browser_ui_port <= 65535):
+                print(self.formatter.error(f"Invalid port: {browser_ui_port}. Must be between 1 and 65535."), file=sys.stderr)
+                return 1
             browser_ui_password = getattr(args, "browser_ui_password", None)
             if browser_ui_enabled and browser_ui_password is None:
                 browser_ui_password = secrets.token_urlsafe(12)

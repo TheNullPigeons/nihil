@@ -302,8 +302,8 @@ class NihilManager:
                     created_from_nihil = "thenullpigeons" in config_image.lower() or "nihil" in config_image.lower()
                     if has_nihil_tag or created_from_nihil:
                         nihil_containers.append(c)
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"Warning: could not inspect container {getattr(c, 'name', '?')}: {e}", file=sys.stderr)
             return nihil_containers
         except docker.errors.APIError as e:
             print(f"Error retrieving containers: {e}", file=sys.stderr)
@@ -337,7 +337,8 @@ class NihilManager:
                         return json.loads(f.read().decode("utf-8"))
             finally:
                 container.remove(force=True)
-        except Exception:
+        except Exception as e:
+            print(f"Warning: could not read tools manifest from '{image_tag}': {e}", file=sys.stderr)
             return None
 
     def get_image_info(self, image_tag: str) -> Optional[Dict]:
@@ -367,7 +368,8 @@ class NihilManager:
             parent = str(Path(container_path).parent)
             container.put_archive(parent, buf.getvalue())
             return True
-        except Exception:
+        except Exception as e:
+            print(f"Warning: could not copy file into container: {e}", file=sys.stderr)
             return False
 
     def exec_in_container(self, container, command: str = "zsh"):
@@ -539,7 +541,7 @@ class NihilManager:
                 else:
                     container.put_archive(parent_dir, tar_bytes)
             except Exception as e:
-                pass
+                print(f"Warning: could not restore '{path}': {e}", file=sys.stderr)
 
 
 
@@ -555,17 +557,10 @@ class NihilManager:
             return True
         except docker.errors.APIError as e:
             if e.response.status_code == 409:
-                if force:
-                    raise ImageRemoveFailed(
-                        image=image,
-                        message=f"Image '{image}' cannot be deleted because it is currently used by one or more containers. "
-                                f"Remove all containers using this image first with 'nihil remove <container_name>'."
-                    )
-                else:
-                    raise ImageRemoveFailed(
-                        image=image,
-                        message=f"Image '{image}' is currently used by a container. "
-                                f"Use --force to see which containers are using it, or remove them first."
-                    )
+                raise ImageRemoveFailed(
+                    image=image,
+                    message=f"Image '{image}' is currently used by one or more containers. "
+                            f"Remove all containers using this image first with 'nihil remove <container_name>'."
+                )
             elif e.response.status_code == 404:
                 raise ImageRemoveFailed(image=image, message=f"Image '{image}' not found.")
