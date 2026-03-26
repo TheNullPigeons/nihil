@@ -3,6 +3,7 @@
 """Browser UI : stockage des mots de passe (wrapper), détection de la page prête."""
 
 import json
+import sys
 from pathlib import Path
 from typing import Optional
 from urllib.request import Request, urlopen
@@ -19,14 +20,16 @@ def save_password(container_name: str, password: str) -> None:
     if path.exists():
         try:
             data = json.loads(path.read_text())
-        except (json.JSONDecodeError, OSError):
-            pass
+        except json.JSONDecodeError:
+            print(f"Warning: browser UI password file is corrupted, resetting.", file=sys.stderr)
+        except OSError as e:
+            print(f"Warning: could not read browser UI password file: {e}", file=sys.stderr)
     data[container_name] = password
     path.write_text(json.dumps(data, indent=0))
     try:
         path.chmod(0o600)
-    except OSError:
-        pass
+    except OSError as e:
+        print(f"Warning: could not set permissions on {path}: {e}. Passwords may be readable by other users.", file=sys.stderr)
 
 
 def load_password(container_name: str) -> Optional[str]:

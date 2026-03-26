@@ -98,7 +98,7 @@ class NihilDoctor:
                 manager.client.images.get(image)
                 out.append(DoctorCheckResult(display_name, True, "Present locally"))
             except docker.errors.ImageNotFound:
-                out.append(DoctorCheckResult(display_name, True, "Not present locally"))
+                out.append(DoctorCheckResult(display_name, False, "Not present locally — run 'nihil install'"))
             except docker.errors.DockerException as e:
                 out.append(DoctorCheckResult(display_name, False, str(e)))
         return out
