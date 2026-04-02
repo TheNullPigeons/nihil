@@ -407,7 +407,10 @@ class NihilController:
                 rows = []
                 for c in available_containers:
                     status = c.status.capitalize()
-                    image_tag = c.image.tags[0] if c.image.tags else c.attrs['Config']['Image']
+                    try:
+                        image_tag = c.image.tags[0] if c.image.tags else c.attrs['Config']['Image']
+                    except Exception:
+                        image_tag = c.attrs.get('Config', {}).get('Image', '<deleted image>')
                     if "/" in image_tag:
                         image_tag = image_tag.split("/")[-1]
                     config_str = "Standard"
@@ -551,7 +554,10 @@ class NihilController:
             rows = []
             for c in nihil_containers:
                 status = c.status.capitalize()
-                image_tag = c.image.tags[0] if c.image.tags else c.attrs["Config"]["Image"]
+                try:
+                    image_tag = c.image.tags[0] if c.image.tags else c.attrs["Config"]["Image"]
+                except Exception:
+                    image_tag = c.attrs.get("Config", {}).get("Image", "<deleted image>")
                 rows.append([c.name, status, self.manager.short_image_name(image_tag)])
             print(self.formatter.section_header("NIHIL CONTAINERS", "🐳 "))
             self.formatter.print_table(["NAME", "STATUS", "IMAGE"], rows)
@@ -928,7 +934,10 @@ class NihilController:
                     status = ("Stopped", self.formatter.RED)
                 else:
                     status = (f"{status_raw}", self.formatter.YELLOW)
-                image_raw = c.image.tags[0] if c.image.tags else "<none>"
+                try:
+                    image_raw = c.image.tags[0] if c.image.tags else c.attrs.get('Config', {}).get('Image', '<none>')
+                except Exception:
+                    image_raw = c.attrs.get('Config', {}).get('Image', '<deleted image>')
                 if "/" in image_raw:
                     image = image_raw.split("/")[-1]
                     if image.startswith("nihil-images"):
