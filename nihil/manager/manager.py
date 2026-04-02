@@ -298,12 +298,19 @@ class NihilManager:
                 try:
                     config_image = c.attrs.get('Config', {}).get('Image', '')
                     known_images = set(self.AVAILABLE_IMAGES.values())
-                    has_nihil_tag = c.image.tags and any(tag in known_images or "thenullpigeons" in tag for tag in c.image.tags)
                     created_from_nihil = "thenullpigeons" in config_image.lower() or "nihil" in config_image.lower()
+                    
+                    has_nihil_tag = False
+                    try:
+                        has_nihil_tag = c.image.tags and any(tag in known_images or "thenullpigeons" in tag for tag in c.image.tags)
+                    except Exception:
+                        pass
+                        
                     if has_nihil_tag or created_from_nihil:
                         nihil_containers.append(c)
                 except Exception as e:
-                    print(f"Warning: could not inspect container {getattr(c, 'name', '?')}: {e}", file=sys.stderr)
+                    # On évite le spam intempestif des erreurs de metadata du Daemon
+                    pass
             return nihil_containers
         except docker.errors.APIError as e:
             print(f"Error retrieving containers: {e}", file=sys.stderr)
