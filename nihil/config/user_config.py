@@ -32,7 +32,7 @@ _DEFAULT_CONFIG: dict = {
         "path": str(NIHIL_HOME / "my-resources"),
     },
     "display": {
-        "x11_by_default": False,
+        "x11_by_default": True,
     },
     "updates": {
         "auto_check": True,
