@@ -205,16 +205,16 @@ class NihilManager:
                 else:
                     x_mode = "unknown"
                 container_config["environment"]["NIHIL_X_MODE"] = x_mode
-                xauth = os.environ.get("XAUTHORITY")
-                if xauth:
-                    xauth_path = Path(xauth).expanduser()
-                    if xauth_path.is_file():
-                        if "volumes" not in container_config:
-                            container_config["volumes"] = {}
-                        container_config["volumes"][str(xauth_path)] = {
-                            "bind": str(xauth_path),
-                            "mode": "ro",
-                        }
+                xauth = os.environ.get("XAUTHORITY") or str(Path.home() / ".Xauthority")
+                xauth_path = Path(xauth).expanduser()
+                if xauth_path.is_file():
+                    if "volumes" not in container_config:
+                        container_config["volumes"] = {}
+                    container_config["volumes"][str(xauth_path)] = {
+                        "bind": str(xauth_path),
+                        "mode": "ro",
+                    }
+                    container_config["environment"]["XAUTHORITY"] = str(xauth_path)
         effective_my_resources = my_resources_path if my_resources_path is not None else MY_RESOURCES_DIR
         if not disable_my_resources and effective_my_resources.exists():
             if "volumes" not in container_config:
