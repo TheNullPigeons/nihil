@@ -41,7 +41,7 @@ _DEFAULT_CONFIG: dict = {
 
 _CONFIG_COMMENT = """\
 # Nihil configuration file
-# Generated automatically — edit to customize your defaults.
+# Generated automatically. Edit to customize your defaults.
 #
 # network.default_network     : host | docker | nat | disabled
 # workspace.default_path      : absolute path used as default workspace (null = disabled)
@@ -91,7 +91,7 @@ class NihilConfig:
             yaml.dump(self._data, fh, default_flow_style=False, allow_unicode=True)
 
     # ------------------------------------------------------------------
-    # Propriétés — network
+    # Propriétés: network
     # ------------------------------------------------------------------
 
     @property
@@ -102,7 +102,7 @@ class NihilConfig:
         return val
 
     # ------------------------------------------------------------------
-    # Propriétés — workspace
+    # Propriétés: workspace
     # ------------------------------------------------------------------
 
     @property
@@ -113,7 +113,7 @@ class NihilConfig:
         return None
 
     # ------------------------------------------------------------------
-    # Propriétés — shell
+    # Propriétés: shell
     # ------------------------------------------------------------------
 
     @property
@@ -135,7 +135,7 @@ class NihilConfig:
         return val
 
     # ------------------------------------------------------------------
-    # Propriétés — my_resources
+    # Propriétés: my_resources
     # ------------------------------------------------------------------
 
     @property
@@ -151,7 +151,7 @@ class NihilConfig:
         return NIHIL_HOME / "my-resources"
 
     # ------------------------------------------------------------------
-    # Propriétés — display
+    # Propriétés: display
     # ------------------------------------------------------------------
 
     @property
@@ -159,7 +159,7 @@ class NihilConfig:
         return bool(self._get("display", "x11_by_default"))
 
     # ------------------------------------------------------------------
-    # Propriétés — updates
+    # Propriétés: updates
     # ------------------------------------------------------------------
 
     @property
