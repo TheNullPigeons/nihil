@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Nihil Doctor — diagnostic de l'environnement local."""
+"""Nihil Doctor: diagnostic de l'environnement local."""
 
 from __future__ import annotations
 
@@ -98,7 +98,7 @@ class NihilDoctor:
                 manager.client.images.get(image)
                 out.append(DoctorCheckResult(display_name, True, "Present locally"))
             except docker.errors.ImageNotFound:
-                out.append(DoctorCheckResult(display_name, False, "Not present locally — run 'nihil install'"))
+                out.append(DoctorCheckResult(display_name, False, "Not present locally. Run 'nihil install'"))
             except docker.errors.DockerException as e:
                 out.append(DoctorCheckResult(display_name, False, str(e)))
         return out
