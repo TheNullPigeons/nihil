@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Controller CLI Nihil — point d'entrée et dispatch des commandes."""
+"""Controller CLI Nihil: point d'entrée et dispatch des commandes."""
 
 import os
 import secrets
@@ -41,7 +41,6 @@ class NihilController:
         )
         if should_show_banner:
             print_compact_banner()
-            print()
         if parsed_args.command is None:
             self.parser.print_help()
             return 0
@@ -862,10 +861,10 @@ class NihilController:
         return 0
 
     def _cmd_images(self) -> int:
-        print(self.formatter.section_header("AVAILABLE IMAGE VARIANTS", "📦 "))
+        print(self.formatter.section_header("AVAILABLE IMAGE VARIANTS"))
         rows = []
         variant_descriptions = {
-            "full": "The whole flock — every tool, every module",
+            "full": "The whole flock, every tool, every module",
             "ad": "Nest in their Active Directory",
             "web": "Beak through their web apps",
             "ctf": "Capture the flag, no fluff",
@@ -892,12 +891,12 @@ class NihilController:
             return 0
         print(self.formatter.info(f"Nihil version {__version__}\n"))
         variant_descriptions = {
-            "full": "The whole flock — every tool, every module",
+            "full": "The whole flock, every tool, every module",
             "ad": "Nest in their Active Directory",
             "web": "Beak through their web apps",
             "ctf": "Capture the flag, no fluff",
         }
-        print(self.formatter.section_header("AVAILABLE IMAGE VARIANTS", "📦 "))
+        print(self.formatter.section_header("AVAILABLE IMAGE VARIANTS"))
         rows = []
         for variant, image_url in self.manager.AVAILABLE_IMAGES.items():
             description = variant_descriptions.get(variant, "Specialized image")
@@ -908,7 +907,7 @@ class NihilController:
         print()
         print(self.formatter.info("Use 'nihil start <name> --image <variant>' to create a container with a specific image."))
         print()
-        print(self.formatter.section_header("INSTALLED IMAGES", "🖼️ "))
+        print(self.formatter.section_header("INSTALLED IMAGES"))
         images = self.manager.list_images()
         if images:
             rows = []

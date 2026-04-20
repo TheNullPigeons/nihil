@@ -1,6 +1,6 @@
 ![banner](nihil/assets/nihil.png)
 
-Nihil is a minimal offensive environment made for security experts, hackers, and students. It gives you ready-to-use Docker images and a CLI so you can spin up a lab without wrestling with base distros or manual installs—transparent, modular, and built for real work.
+Nihil is a minimal offensive environment made for security experts, hackers, and students. It gives you ready-to-use Docker images and a CLI so you can spin up a lab without wrestling with base distros or manual installs, transparent, modular, and built for real work.
 
 Want to know more? Go to the [project website](https://thenullpigeons.org).
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Formatter Nihil — formatage de la sortie CLI."""
+"""Formatter Nihil: formatage de la sortie CLI."""
 
 
 class NihilFormatter:
@@ -57,8 +57,8 @@ class NihilFormatter:
             from rich.table import Table
             from rich import box
             from rich.text import Text
-            table = Table(show_header=True, header_style="bold blue", border_style="bold #d2ac7e",
-                          box=box.SQUARE, title_justify="left")
+            table = Table(show_header=True, header_style="bold blue", border_style="#d2ac7e",
+                          box=box.ROUNDED, title_justify="left")
             for col in columns:
                 table.add_column(str(col))
             for row in rows:
