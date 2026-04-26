@@ -50,7 +50,7 @@ Examples:
     start_parser.add_argument("name", help="Container name")
     start_parser.add_argument("--privileged", action="store_true", help="Privileged mode")
     start_parser.add_argument("--network", choices=["docker", "host", "disabled", "nat"], default=None, help="Network mode (default: from config, fallback: host)")
-    start_parser.add_argument("--image", choices=["full", "ad", "web", "ctf"], default=None, help="Image variant to use. If not specified, you will be prompted to select one.")
+    start_parser.add_argument("--image", default=None, metavar="VARIANT", help="Image variant to use (full|ad|web|ctf or nihil/<variant>:local). If not specified, you will be prompted to select one.")
     start_parser.add_argument("--workspace", help="Workspace path to mount")
     start_parser.add_argument("--workspace-here", action="store_true", help="Mount the current working directory as /workspace inside the container.")
     start_parser.add_argument("--vpn", metavar="FILE", default=None, help="Path to OpenVPN config file (.ovpn). Starts the container with VPN; VPN stops when you exit the container.")
@@ -70,7 +70,7 @@ Examples:
     remove_parser.add_argument("--force", "-f", action="store_true", help="Force removal")
 
     install_parser = subparsers.add_parser("install", help="Install or update nihil images")
-    install_parser.add_argument("image", choices=["full", "ad", "web", "ctf"], nargs="?", default=None, help="Image variant to install. If not specified, prompted to select.")
+    install_parser.add_argument("image", nargs="?", default=None, metavar="VARIANT", help="Image variant to install (full|ad|web|ctf). If not specified, prompted to select.")
 
     uninstall_parser = subparsers.add_parser("uninstall", help="Remove nihil images")
     uninstall_parser.add_argument("names", nargs="*", help="Image name(s)")
@@ -94,6 +94,13 @@ Examples:
 
     config_parser = subparsers.add_parser("config", help="Show or edit the Nihil configuration file")
     config_parser.add_argument("--edit", "-e", action="store_true", help="Open the config file in $EDITOR")
+
+    build_parser = subparsers.add_parser("build", help="Build a nihil image locally from source")
+    build_parser.add_argument("variant", choices=["full", "ad", "ctf", "web", "test"], nargs="?", default="full", help="Image variant to build (default: full)")
+    build_parser.add_argument("--source", "-s", metavar="PATH", default=None, help="Path to nihil-images source directory (overrides config)")
+    build_parser.add_argument("--no-cache", action="store_true", help="Pass --no-cache to docker build")
+    build_parser.add_argument("--tag", "-t", metavar="TAG", default=None, help="Custom image tag (default: nihil/<variant>:local)")
+    build_parser.add_argument("--log", "-l", metavar="FILE", default=None, help="Write build output to a log file (use 'tail -f FILE' to follow)")
 
     completion_parser = subparsers.add_parser("completion", help="Generate shell completion script")
     completion_parser.add_argument("shell", choices=["bash", "zsh"], help="Target shell for completion script (bash or zsh)")

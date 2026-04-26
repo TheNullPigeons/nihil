@@ -5,8 +5,11 @@
 import io
 import os
 import random
+import shutil
+import subprocess
 import sys
 import tarfile
+import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 
@@ -205,16 +208,31 @@ class NihilManager:
                 else:
                     x_mode = "unknown"
                 container_config["environment"]["NIHIL_X_MODE"] = x_mode
-                xauth = os.environ.get("XAUTHORITY") or str(Path.home() / ".Xauthority")
-                xauth_path = Path(xauth).expanduser()
-                if xauth_path.is_file():
-                    if "volumes" not in container_config:
-                        container_config["volumes"] = {}
-                    container_config["volumes"][str(xauth_path)] = {
-                        "bind": str(xauth_path),
-                        "mode": "ro",
-                    }
-                    container_config["environment"]["XAUTHORITY"] = str(xauth_path)
+                # Allow the container (running as root) to connect to the host X server.
+                # xhost +si:localuser:root grants root access without relying on XAUTHORITY
+                # ownership (which would be uid 1000 and cause Firefox/Chromium to refuse).
+                if shutil.which("xhost"):
+                    subprocess.run(
+                        ["xhost", "+si:localuser:root"],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                else:
+                    # xhost unavailable: fall back to mounting the xauth file.
+                    # GUI apps running as root may still complain about ownership.
+                    xauth = os.environ.get("XAUTHORITY") or str(Path.home() / ".Xauthority")
+                    xauth_path = Path(xauth).expanduser()
+                    if xauth_path.is_file():
+                        if "volumes" not in container_config:
+                            container_config["volumes"] = {}
+                        xauth_tmp_fd, xauth_tmp = tempfile.mkstemp(prefix=".nihil_xauth_")
+                        os.close(xauth_tmp_fd)
+                        shutil.copy2(str(xauth_path), xauth_tmp)
+                        container_config["volumes"][xauth_tmp] = {
+                            "bind": xauth_tmp,
+                            "mode": "ro",
+                        }
+                        container_config["environment"]["XAUTHORITY"] = xauth_tmp
         effective_my_resources = my_resources_path if my_resources_path is not None else MY_RESOURCES_DIR
         if not disable_my_resources and effective_my_resources.exists():
             if "volumes" not in container_config:
@@ -320,11 +338,43 @@ class NihilManager:
         try:
             images = self.client.images.list()
             known_images = set(self.AVAILABLE_IMAGES.values())
-            nihil_images = [img for img in images if img.tags and any(tag in known_images or "thenullpigeons" in tag for tag in img.tags)]
+            nihil_images = []
+            for img in images:
+                if not img.tags:
+                    continue
+                for tag in img.tags:
+                    if tag in known_images or "thenullpigeons" in tag or tag.startswith("nihil/"):
+                        nihil_images.append(img)
+                        break
             return nihil_images
         except docker.errors.APIError as e:
             print(f"Error retrieving images: {e}", file=sys.stderr)
             return []
+
+    def list_local_variants(self) -> Dict[str, str]:
+        """Retourne les builds locaux nihil/<variant>:local sous forme {variant: tag}."""
+        local: Dict[str, str] = {}
+        try:
+            for img in self.client.images.list():
+                for tag in (img.tags or []):
+                    if tag.startswith("nihil/") and tag.endswith(":local"):
+                        variant = tag[len("nihil/"):-len(":local")]
+                        local[variant] = tag
+        except docker.errors.APIError:
+            pass
+        return local
+
+    def resolve_image_tag(self, image_arg: str) -> Optional[str]:
+        """Résout un nom de variant vers un tag Docker (registry ou build local)."""
+        if image_arg in self.AVAILABLE_IMAGES:
+            return self.AVAILABLE_IMAGES[image_arg]
+        local_tag = f"nihil/{image_arg}:local"
+        try:
+            self.client.images.get(local_tag)
+            return local_tag
+        except docker.errors.ImageNotFound:
+            pass
+        return None
 
     def get_tools_manifest(self, image_tag: str) -> Optional[Dict]:
         """Extract tools.json from a nihil image."""
