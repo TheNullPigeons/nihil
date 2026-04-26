@@ -37,6 +37,9 @@ _DEFAULT_CONFIG: dict = {
     "updates": {
         "auto_check": True,
     },
+    "build": {
+        "images_path": None,  # path to nihil-images source directory
+    },
 }
 
 _CONFIG_COMMENT = """\
@@ -52,6 +55,7 @@ _CONFIG_COMMENT = """\
 # my_resources.path           : custom path for my-resources
 # display.x11_by_default      : enable X11 forwarding by default
 # updates.auto_check          : check for image updates on start
+# build.images_path           : path to nihil-images source directory (for nihil build)
 
 """
 
@@ -166,6 +170,17 @@ class NihilConfig:
     def auto_check_updates(self) -> bool:
         val = self._get("updates", "auto_check")
         return val if val is not None else True
+
+    # ------------------------------------------------------------------
+    # Propriétés: build
+    # ------------------------------------------------------------------
+
+    @property
+    def images_path(self) -> Optional[Path]:
+        raw = self._get("build", "images_path")
+        if raw:
+            return Path(raw).expanduser().resolve()
+        return None
 
     # ------------------------------------------------------------------
     # Helpers internes

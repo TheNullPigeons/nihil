@@ -35,5 +35,9 @@ def short_image_name(full_tag: str) -> str:
     """
     if full_tag in SHORT_NAMES:
         return SHORT_NAMES[full_tag]
+    if full_tag.startswith("nihil/"):
+        rest = full_tag[len("nihil/"):]
+        variant, _, tag = rest.partition(":")
+        return f"{variant} [{tag}]" if tag else variant
     name = full_tag.split("/")[-1] if "/" in full_tag else full_tag
     return name

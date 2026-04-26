@@ -79,6 +79,8 @@ class NihilController:
             return self._cmd_upgrade(parsed_args)
         elif parsed_args.command == "tools":
             return self._cmd_tools(parsed_args)
+        elif parsed_args.command == "build":
+            return self._cmd_build(parsed_args)
         elif parsed_args.command == "completion":
             return self._cmd_completion(parsed_args)
         return 0
@@ -128,17 +130,24 @@ class NihilController:
                 from rich.prompt import IntPrompt
                 console = Console()
                 print(self.formatter.info("No image specified. Please select one:"))
-                variants = list(self.manager.AVAILABLE_IMAGES.keys())
+                local_variants = self.manager.list_local_variants()
+                all_variants: dict = {**self.manager.AVAILABLE_IMAGES, **{
+                    k: v for k, v in local_variants.items() if k not in self.manager.AVAILABLE_IMAGES
+                }}
+                variants = list(all_variants.keys())
                 rows = []
                 for i, variant in enumerate(variants):
-                    desc = "The whole flock"
-                    if "ad" in variant:
+                    if variant in local_variants and variant not in self.manager.AVAILABLE_IMAGES:
+                        desc = "Local build"
+                    elif "ad" in variant:
                         desc = "Active Directory tools"
                     elif "web" in variant:
                         desc = "Web Hacking tools"
                     elif "ctf" in variant:
                         desc = "Capture The Flag tools"
-                    image_tag = self.manager.AVAILABLE_IMAGES[variant]
+                    else:
+                        desc = "The whole flock"
+                    image_tag = all_variants[variant]
                     info = self.manager.get_image_info(image_tag)
                     if info:
                         size_gb = info["size_bytes"] / (1024 ** 3)
@@ -156,7 +165,7 @@ class NihilController:
                 except KeyboardInterrupt:
                     print("\nAborted.")
                     return 1
-            image = self.manager.AVAILABLE_IMAGES.get(image_arg, self.manager.DEFAULT_IMAGE)
+            image = self.manager.resolve_image_tag(image_arg) or self.manager.DEFAULT_IMAGE
             print(self.formatter.info(f"Using image variant: {image_arg} ({image})"))
             vpn_path = getattr(args, "vpn", None)
             workspace_path = args.workspace
@@ -869,8 +878,10 @@ class NihilController:
             "web": "Beak through their web apps",
             "ctf": "Capture the flag, no fluff",
         }
-        for variant, image_url in self.manager.AVAILABLE_IMAGES.items():
-            description = variant_descriptions.get(variant, "Specialized image")
+        local_v = self.manager.list_local_variants()
+        all_v = {**self.manager.AVAILABLE_IMAGES, **{k: v for k, v in local_v.items() if k not in self.manager.AVAILABLE_IMAGES}}
+        for variant, image_url in all_v.items():
+            description = variant_descriptions.get(variant, "Local build")
             info = self.manager.get_image_info(image_url)
             size_str = f"{info['size_bytes'] / (1024**3):.2f} GB" if info else "-"
             rows.append([variant, self.manager.short_image_name(image_url), size_str, description])
@@ -898,8 +909,12 @@ class NihilController:
         }
         print(self.formatter.section_header("AVAILABLE IMAGE VARIANTS"))
         rows = []
-        for variant, image_url in self.manager.AVAILABLE_IMAGES.items():
-            description = variant_descriptions.get(variant, "Specialized image")
+        local_variants = self.manager.list_local_variants()
+        all_variants = {**self.manager.AVAILABLE_IMAGES, **{
+            k: v for k, v in local_variants.items() if k not in self.manager.AVAILABLE_IMAGES
+        }}
+        for variant, image_url in all_variants.items():
+            description = variant_descriptions.get(variant, "Local build")
             info = self.manager.get_image_info(image_url)
             size_str = f"{info['size_bytes'] / (1024**3):.2f} GB" if info else "-"
             rows.append([variant, self.manager.short_image_name(image_url), size_str, description])
@@ -992,6 +1007,99 @@ class NihilController:
             print(self.formatter.info(f"Edit: nihil config --edit  or  $EDITOR {CONFIG_FILE}"))
         except ImportError:
             print(f"Config file: {CONFIG_FILE}")
+        return 0
+
+    def _cmd_build(self, args) -> int:
+        import subprocess
+        from datetime import datetime, timezone
+
+        DOCKERFILES = {
+            "full": "Dockerfile",
+            "ad":   "Dockerfile.ad",
+            "ctf":  "Dockerfile.ctf",
+            "web":  "Dockerfile.web",
+            "test": "Dockerfile.test",
+        }
+
+        variant = args.variant or "full"
+
+        raw_source = getattr(args, "source", None) or self.config.images_path
+        if raw_source:
+            source = Path(raw_source).expanduser().resolve()
+        else:
+            cwd = Path.cwd()
+            if (cwd / "build" / "entrypoint.sh").is_file():
+                source = cwd
+            else:
+                print(self.formatter.error(
+                    "Run this command from the nihil-images directory, or set the path once:\n"
+                    "  nihil build --source /path/to/nihil-images\n"
+                    "  nihil config --edit  →  build.images_path: /path/to/nihil-images"
+                ), file=sys.stderr)
+                return 1
+        if not source.is_dir():
+            print(self.formatter.error(f"Source directory not found: {source}"), file=sys.stderr)
+            return 1
+
+        dockerfile = source / DOCKERFILES[variant]
+        if not dockerfile.is_file():
+            print(self.formatter.error(f"Dockerfile not found: {dockerfile}"), file=sys.stderr)
+            return 1
+
+        tag = getattr(args, "tag", None) or f"nihil/{variant}:local"
+        build_date = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        cmd = [
+            "docker", "build",
+            "--file", str(dockerfile),
+            "--tag", tag,
+            "--build-arg", "TAG=local",
+            "--build-arg", "VERSION=local",
+            "--build-arg", f"BUILD_DATE={build_date}",
+        ]
+        if getattr(args, "no_cache", False):
+            cmd.append("--no-cache")
+        cmd.append(str(source))
+
+        log_path = getattr(args, "log", None)
+
+        print(self.formatter.info(f"Building variant '{variant}' -> {tag}"))
+        print(self.formatter.info(f"Source: {source}"))
+        print(self.formatter.info(f"Dockerfile: {DOCKERFILES[variant]}"))
+        if log_path:
+            print(self.formatter.info(f"Build log: {log_path}  (tail -f {log_path})"))
+        print()
+
+        log_file = open(log_path, "a", buffering=1) if log_path else None
+        returncode = 0
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
+            while True:
+                chunk = proc.stdout.read1(4096)
+                if not chunk:
+                    break
+                text = chunk.decode("utf-8", errors="replace")
+                sys.stdout.write(text)
+                sys.stdout.flush()
+                if log_file:
+                    log_file.write(text)
+            proc.wait()
+            returncode = proc.returncode
+        finally:
+            if log_file:
+                log_file.close()
+        if returncode != 0:
+            print(self.formatter.error(f"Build failed (exit {returncode})."), file=sys.stderr)
+            return returncode
+
+        print()
+        print(self.formatter.success(f"Build complete: {tag}"))
+        print(self.formatter.info(f"Start a container: nihil start mytest --image {variant}"))
         return 0
 
     def _cmd_completion(self, args) -> int:
