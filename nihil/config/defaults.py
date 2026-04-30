@@ -60,3 +60,13 @@ def ensure_filesystem() -> None:
             "# Exemple :\n"
             "# set -g mouse on\n"
         )
+
+    # --- user setup script ---
+    user_setup = base / "load_user_setup.sh"
+    if not user_setup.exists():
+        user_setup.write_text(
+            "#!/bin/bash\n"
+            "# Runs once at first container start.\n"
+            "# Place your custom installs here.\n"
+        )
+        user_setup.chmod(0o755)

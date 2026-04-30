@@ -670,7 +670,6 @@ class NihilController:
                 "/root/.john/john.pot",
                 "/etc/hosts",
                 "/etc/resolv.conf",
-                "/opt/tools/Exegol-history/profile.sh",
                 "/etc/proxychains.conf",
                 "/etc/proxychains4.conf"
             ]
