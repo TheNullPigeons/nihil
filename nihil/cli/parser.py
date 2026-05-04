@@ -51,7 +51,7 @@ Examples:
     start_parser.add_argument("--privileged", action="store_true", help="Privileged mode")
     start_parser.add_argument("--network", choices=["docker", "host", "disabled", "nat"], default=None, help="Network mode (default: from config, fallback: host)")
     start_parser.add_argument("--image", default=None, metavar="VARIANT", help="Image variant to use (full|ad|web|ctf or nihil/<variant>:local). If not specified, you will be prompted to select one.")
-    start_parser.add_argument("--workspace", help="Workspace path to mount")
+    start_parser.add_argument("--workspace", "-w", help="Workspace path to mount")
     start_parser.add_argument("--workspace-here", action="store_true", help="Mount the current working directory as /workspace inside the container.")
     start_parser.add_argument("--vpn", metavar="FILE", default=None, help="Path to OpenVPN config file (.ovpn). Starts the container with VPN; VPN stops when you exit the container.")
     start_parser.add_argument("--enable-x11", action="store_true", help="Enable X11/XWayland GUI support (mount host X socket and forward DISPLAY).")
