@@ -100,6 +100,18 @@ class NihilController:
         # Appliquer les defaults de config pour les options non spécifiées par l'utilisateur
         if args.network is None:
             args.network = self.config.default_network
+        from nihil.utils.platform_info import get_host_os, get_docker_engine, host_network_supported, HostOS
+        _host_os = get_host_os()
+        _docker_engine = get_docker_engine(self.manager.client)
+        if not host_network_supported(_host_os, _docker_engine) and args.network == "host":
+            print(self.formatter.warning(
+                "Host networking is not supported on this platform. Switching to 'docker' network mode."
+            ))
+            args.network = "docker"
+        if _host_os == HostOS.MACOS and getattr(args, "enable_x11", False):
+            print(self.formatter.info(
+                "macOS detected: using XQuartz for X11. Make sure XQuartz is running and run 'xhost +localhost' on your host."
+            ))
         if not args.enable_x11 and self.config.x11_by_default:
             args.enable_x11 = True
         if not args.no_my_resources and not self.config.my_resources_enabled:
