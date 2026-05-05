@@ -168,10 +168,13 @@ class NihilManager:
         if workspace:
             volumes[workspace] = {"bind": "/workspace", "mode": "rw"}
         if enable_x11:
-            display = os.environ.get("DISPLAY")
-            x11_socket = Path("/tmp/.X11-unix")
-            if display and x11_socket.exists():
-                volumes[str(x11_socket)] = {"bind": "/tmp/.X11-unix", "mode": "rw"}
+            from nihil.utils.platform_info import get_host_os, HostOS
+            _host_os = get_host_os()
+            if _host_os != HostOS.MACOS:
+                display = os.environ.get("DISPLAY")
+                x11_socket = Path("/tmp/.X11-unix")
+                if display and x11_socket.exists():
+                    volumes[str(x11_socket)] = {"bind": "/tmp/.X11-unix", "mode": "rw"}
         if volumes:
             container_config["volumes"] = volumes
         if network_mode:
@@ -193,48 +196,51 @@ class NihilManager:
                 )
             container_config["environment"]["NIHIL_VPN"] = "1"
         if enable_x11:
-            display = os.environ.get("DISPLAY")
-            if display:
-                container_config["environment"] = container_config.get("environment") or {}
-                if isinstance(container_config["environment"], list):
-                    container_config["environment"] = dict(
-                        kv.split("=", 1) for kv in container_config["environment"] if "=" in kv
-                    )
-                container_config["environment"]["DISPLAY"] = display
-                session_type = os.environ.get("XDG_SESSION_TYPE", "").lower()
-                wayland_display = os.environ.get("WAYLAND_DISPLAY")
-                if session_type == "wayland" or wayland_display:
-                    x_mode = "xwayland"
-                elif session_type == "x11":
-                    x_mode = "x11"
-                else:
-                    x_mode = "unknown"
-                container_config["environment"]["NIHIL_X_MODE"] = x_mode
-                # Allow the container (running as root) to connect to the host X server.
-                # xhost +si:localuser:root grants root access without relying on XAUTHORITY
-                # ownership (which would be uid 1000 and cause Firefox/Chromium to refuse).
-                if shutil.which("xhost"):
-                    subprocess.run(
-                        ["xhost", "+si:localuser:root"],
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                    )
-                else:
-                    # xhost unavailable: fall back to mounting the xauth file.
-                    # GUI apps running as root may still complain about ownership.
-                    xauth = os.environ.get("XAUTHORITY") or str(Path.home() / ".Xauthority")
-                    xauth_path = Path(xauth).expanduser()
-                    if xauth_path.is_file():
-                        if "volumes" not in container_config:
-                            container_config["volumes"] = {}
-                        xauth_tmp_fd, xauth_tmp = tempfile.mkstemp(prefix=".nihil_xauth_")
-                        os.close(xauth_tmp_fd)
-                        shutil.copy2(str(xauth_path), xauth_tmp)
-                        container_config["volumes"][xauth_tmp] = {
-                            "bind": xauth_tmp,
-                            "mode": "ro",
-                        }
-                        container_config["environment"]["XAUTHORITY"] = xauth_tmp
+            from nihil.utils.platform_info import get_host_os, HostOS
+            _host_os = get_host_os()
+            container_config["environment"] = container_config.get("environment") or {}
+            if isinstance(container_config["environment"], list):
+                container_config["environment"] = dict(
+                    kv.split("=", 1) for kv in container_config["environment"] if "=" in kv
+                )
+            if _host_os == HostOS.MACOS:
+                container_config["environment"]["DISPLAY"] = "host.docker.internal:0"
+                container_config["environment"]["NIHIL_X_MODE"] = "xquartz"
+            else:
+                display = os.environ.get("DISPLAY")
+                if display:
+                    container_config["environment"]["DISPLAY"] = display
+                    session_type = os.environ.get("XDG_SESSION_TYPE", "").lower()
+                    wayland_display = os.environ.get("WAYLAND_DISPLAY")
+                    if session_type == "wayland" or wayland_display:
+                        x_mode = "xwayland"
+                    elif session_type == "x11":
+                        x_mode = "x11"
+                    else:
+                        x_mode = "unknown"
+                    container_config["environment"]["NIHIL_X_MODE"] = x_mode
+                    # xhost +si:localuser:root grants root access without relying on XAUTHORITY
+                    # ownership (which would be uid 1000 and cause Firefox/Chromium to refuse).
+                    if shutil.which("xhost"):
+                        subprocess.run(
+                            ["xhost", "+si:localuser:root"],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                        )
+                    else:
+                        xauth = os.environ.get("XAUTHORITY") or str(Path.home() / ".Xauthority")
+                        xauth_path = Path(xauth).expanduser()
+                        if xauth_path.is_file():
+                            if "volumes" not in container_config:
+                                container_config["volumes"] = {}
+                            xauth_tmp_fd, xauth_tmp = tempfile.mkstemp(prefix=".nihil_xauth_")
+                            os.close(xauth_tmp_fd)
+                            shutil.copy2(str(xauth_path), xauth_tmp)
+                            container_config["volumes"][xauth_tmp] = {
+                                "bind": xauth_tmp,
+                                "mode": "ro",
+                            }
+                            container_config["environment"]["XAUTHORITY"] = xauth_tmp
         effective_my_resources = my_resources_path if my_resources_path is not None else MY_RESOURCES_DIR
         if not disable_my_resources and effective_my_resources.exists():
             if "volumes" not in container_config:

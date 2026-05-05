@@ -6,8 +6,10 @@ from __future__ import annotations
 
 import os
 import platform
+import shutil
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import List, Optional
 
 import docker
@@ -15,6 +17,7 @@ import docker
 from nihil.exceptions import DockerUnavailable, ImagePullFailed, NihilError
 from nihil.console import NihilFormatter
 from nihil.manager import NihilManager
+from nihil.utils.platform_info import get_host_os, get_docker_engine, host_network_supported, HostOS, DockerEngine
 
 
 @dataclass
@@ -36,6 +39,7 @@ class NihilDoctor:
         try:
             manager = NihilManager()
             docker_results.append(DoctorCheckResult("Docker daemon accessible", True))
+            docker_results.extend(self._check_docker_engine(manager))
             docker_results.extend(self._check_image(manager))
         except NihilError as e:
             docker_results.append(DoctorCheckResult("Docker daemon accessible", False, str(e)))
@@ -77,12 +81,46 @@ class NihilDoctor:
 
     def _check_runtime(self) -> List[DoctorCheckResult]:
         py = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
-        return [
+        host_os = get_host_os()
+        results = [
             DoctorCheckResult("Python >= 3.12", sys.version_info >= (3, 12), f"Detected Python: {py}"),
             DoctorCheckResult("Detected OS", True, f"{platform.system()} {platform.release()} ({platform.machine()})"),
             DoctorCheckResult("Docker SDK present", True, f"docker=={getattr(docker, '__version__', '?')}"),
             DoctorCheckResult("DOCKER_HOST", True, os.environ.get("DOCKER_HOST", "<not set>")),
         ]
+        if host_os == HostOS.MACOS:
+            results.extend(self._check_macos())
+        return results
+
+    def _check_macos(self) -> List[DoctorCheckResult]:
+        results = []
+        xquartz_path = Path("/Applications/Utilities/XQuartz.app")
+        xquartz_ok = xquartz_path.exists() or shutil.which("xquartz") is not None
+        results.append(DoctorCheckResult(
+            "XQuartz installed",
+            xquartz_ok,
+            "Found" if xquartz_ok else "Not found — required for --enable-x11 (https://www.xquartz.org)",
+        ))
+        return results
+
+    def _check_docker_engine(self, manager: NihilManager) -> List[DoctorCheckResult]:
+        host_os = get_host_os()
+        engine = get_docker_engine(manager.client)
+        engine_labels = {
+            DockerEngine.NATIVE: "Native Docker",
+            DockerEngine.DOCKER_DESKTOP: "Docker Desktop",
+            DockerEngine.ORBSTACK: "OrbStack",
+            DockerEngine.UNKNOWN: "Unknown",
+        }
+        label = engine_labels.get(engine, "Unknown")
+        results = [DoctorCheckResult("Docker engine", True, label)]
+        if host_os == HostOS.MACOS and engine == DockerEngine.DOCKER_DESKTOP:
+            results.append(DoctorCheckResult(
+                "Host networking",
+                False,
+                "Not supported on Docker Desktop — consider OrbStack for full support",
+            ))
+        return results
 
     def _check_image(self, manager: NihilManager) -> List[DoctorCheckResult]:
         out: List[DoctorCheckResult] = []
