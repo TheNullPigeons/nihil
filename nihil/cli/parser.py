@@ -31,6 +31,10 @@ Examples:
   nihil upgrade                        Upgrade all nihil containers (interactive)
   nihil upgrade pentest                Upgrade a specific container
   nihil upgrade pentest ctf            Upgrade multiple containers
+  nihil resources install              Clone the shared nihil-resources catalog
+  nihil resources update               git pull the local nihil-resources catalog
+  nihil resources sync                 Fetch tools listed in catalog/resources.toml
+  nihil resources status               Show local nihil-resources status
 
         """
     )
@@ -56,6 +60,7 @@ Examples:
     start_parser.add_argument("--vpn", metavar="FILE", default=None, help="Path to OpenVPN config file (.ovpn). Starts the container with VPN; VPN stops when you exit the container.")
     start_parser.add_argument("--enable-x11", action="store_true", help="Enable X11/XWayland GUI support (mount host X socket and forward DISPLAY).")
     start_parser.add_argument("--no-my-resources", action="store_true", help="Do not mount '~/.nihil/my-resources' into the container.")
+    start_parser.add_argument("--no-nihil-resources", action="store_true", help="Do not mount the shared 'nihil-resources' catalog into the container.")
     start_parser.add_argument("--browser-ui", action="store_true", help="Expose a browser-based UI (noVNC) for this session.")
     start_parser.add_argument("--browser-ui-port", type=int, default=None, metavar="PORT", help="Port for the browser UI (default: random 6901-6999 if not set).")
     start_parser.add_argument("--browser-ui-password", type=str, default=None, metavar="PASSWORD", help="Password for browser UI session (default: random, shown once when ready).")
@@ -101,6 +106,16 @@ Examples:
     build_parser.add_argument("--no-cache", action="store_true", help="Pass --no-cache to docker build")
     build_parser.add_argument("--tag", "-t", metavar="TAG", default=None, help="Custom image tag (default: nihil/<variant>:local)")
     build_parser.add_argument("--log", "-l", metavar="FILE", default=None, help="Write build output to a log file (use 'tail -f FILE' to follow)")
+
+    resources_parser = subparsers.add_parser("resources", help="Manage the shared nihil-resources catalog")
+    resources_subparsers = resources_parser.add_subparsers(dest="resources_action", metavar="ACTION")
+    resources_install = resources_subparsers.add_parser("install", help="Clone the nihil-resources repository locally")
+    resources_install.add_argument("--path", "-p", default=None, metavar="PATH", help="Destination path (default: from config, fallback: ~/.nihil/nihil-resources)")
+    resources_install.add_argument("--force", "-f", action="store_true", help="Re-clone even if the destination already exists (after confirmation)")
+    resources_update = resources_subparsers.add_parser("update", help="git pull the local nihil-resources repository")
+    resources_sync = resources_subparsers.add_parser("sync", help="Run the nihil-resources scripts/sync.py to fetch enabled tools")
+    resources_sync.add_argument("--profile", default=None, help="Restrict sync to a profile (full|ad|web|ctf)")
+    resources_subparsers.add_parser("status", help="Show local nihil-resources status (path, branch, last commit)")
 
     completion_parser = subparsers.add_parser("completion", help="Generate shell completion script")
     completion_parser.add_argument("shell", choices=["bash", "zsh"], help="Target shell for completion script (bash or zsh)")

@@ -52,6 +52,8 @@ class NihilController:
             return doctor.run()
         if parsed_args.command == "config":
             return self._cmd_config(parsed_args)
+        if parsed_args.command == "resources":
+            return self._cmd_resources(parsed_args)
         try:
             self.manager = NihilManager()
         except NihilError as e:
@@ -102,6 +104,20 @@ class NihilController:
             args.enable_x11 = True
         if not args.no_my_resources and not self.config.my_resources_enabled:
             args.no_my_resources = True
+        if not getattr(args, "no_nihil_resources", False) and not self.config.nihil_resources_enabled:
+            args.no_nihil_resources = True
+        if not getattr(args, "no_nihil_resources", False):
+            nr_path = self.config.nihil_resources_path
+            if not nr_path.exists():
+                if self._prompt_install_nihil_resources(nr_path):
+                    rc = self._clone_nihil_resources(nr_path)
+                    if rc != 0:
+                        # Échec ou refus du clone : on continue sans monter
+                        args.no_nihil_resources = True
+                else:
+                    args.no_nihil_resources = True
+            elif self.config.nihil_resources_auto_update:
+                self._nihil_resources_pull(nr_path, quiet=True)
         if not args.log and self.config.logging_always_enable:
             args.log = True
         if args.workspace is None and not args.workspace_here and self.config.default_workspace:
@@ -204,6 +220,8 @@ class NihilController:
                 enable_x11=getattr(args, "enable_x11", False),
                 disable_my_resources=getattr(args, "no_my_resources", False),
                 my_resources_path=self.config.my_resources_path,
+                disable_nihil_resources=getattr(args, "no_nihil_resources", False),
+                nihil_resources_path=self.config.nihil_resources_path,
                 browser_ui=browser_ui_enabled,
                 browser_ui_port=browser_ui_port if browser_ui_enabled else None,
                 browser_ui_password=browser_ui_password if browser_ui_enabled else None,
@@ -1000,6 +1018,9 @@ class NihilController:
             table.add_row("[bold]shell.logging.method[/]", cfg.logging_method)
             table.add_row("[bold]my_resources.enabled[/]", "[green]yes[/]" if cfg.my_resources_enabled else "[red]no[/]")
             table.add_row("[bold]my_resources.path[/]", str(cfg.my_resources_path))
+            table.add_row("[bold]nihil_resources.enabled[/]", "[green]yes[/]" if cfg.nihil_resources_enabled else "[red]no[/]")
+            table.add_row("[bold]nihil_resources.path[/]", str(cfg.nihil_resources_path))
+            table.add_row("[bold]nihil_resources.auto_update[/]", "[green]yes[/]" if cfg.nihil_resources_auto_update else "[red]no[/]")
             table.add_row("[bold]display.x11_by_default[/]", "[green]yes[/]" if cfg.x11_by_default else "[red]no[/]")
             table.add_row("[bold]updates.auto_check[/]", "[green]yes[/]" if cfg.auto_check_updates else "[red]no[/]")
             console.print(Panel(table, title="[bold]Nihil Configuration[/]", border_style="blue", padding=(0, 1)))
@@ -1099,6 +1120,201 @@ class NihilController:
         print()
         print(self.formatter.success(f"Build complete: {tag}"))
         print(self.formatter.info(f"Start a container: nihil start mytest --image {variant}"))
+        return 0
+
+    # ------------------------------------------------------------------
+    # Catalogue partagé : nihil-resources
+    # ------------------------------------------------------------------
+
+    def _cmd_resources(self, args) -> int:
+        from nihil.config import NIHIL_RESOURCES_REPO
+
+        action = getattr(args, "resources_action", None)
+        if action is None:
+            self.parser.parse_args(["resources", "--help"])
+            return 0
+        if action == "install":
+            return self._resources_install(args, NIHIL_RESOURCES_REPO)
+        if action == "update":
+            return self._resources_update()
+        if action == "sync":
+            return self._resources_sync(args)
+        if action == "status":
+            return self._resources_status()
+        return 1
+
+    def _resources_install(self, args, repo_url: str) -> int:
+        import shutil
+
+        target = Path(getattr(args, "path", None) or self.config.nihil_resources_path).expanduser().resolve()
+        if target.exists() and any(target.iterdir()):
+            if not getattr(args, "force", False):
+                print(self.formatter.error(
+                    f"Destination not empty: {target}\n"
+                    f"Use --force to delete it and re-clone, or run: nihil resources update"
+                ), file=sys.stderr)
+                return 1
+            try:
+                from rich.prompt import Confirm
+                if not Confirm.ask(f"Delete '{target}' and re-clone?", default=False):
+                    print("Aborted.")
+                    return 1
+            except ImportError:
+                pass
+            shutil.rmtree(target)
+        rc = self._clone_nihil_resources(target, repo_url=repo_url)
+        if rc != 0:
+            return rc
+        if target.resolve() != self.config.nihil_resources_path.resolve():
+            print(self.formatter.warning(
+                f"Cloned to {target}, but config points to {self.config.nihil_resources_path}.\n"
+                f"Update nihil_resources.path in ~/.nihil/config.yml or move the clone."
+            ))
+        print(self.formatter.info("Next: nihil resources sync   (to fetch tools listed in catalog/resources.toml)"))
+        return 0
+
+    def _prompt_install_nihil_resources(self, target: Path) -> bool:
+        """Demande à l'utilisateur s'il veut télécharger nihil-resources. Renvoie False si stdin n'est pas un TTY."""
+        if not sys.stdin.isatty():
+            return False
+        print(self.formatter.warning(
+            f"Shared catalog 'nihil-resources' is not installed at {target}."
+        ))
+        try:
+            from rich.prompt import Confirm
+            return bool(Confirm.ask("Do you want to download it now?", default=True))
+        except ImportError:
+            try:
+                resp = input("Do you want to download it now? [Y/n] ").strip().lower()
+            except EOFError:
+                return False
+            return resp in ("", "y", "yes", "o", "oui")
+
+    def _clone_nihil_resources(self, target: Path, repo_url: Optional[str] = None) -> int:
+        import shutil
+        import subprocess
+
+        from nihil.config import NIHIL_RESOURCES_REPO
+
+        if not shutil.which("git"):
+            print(self.formatter.error("git is required to install nihil-resources."), file=sys.stderr)
+            return 1
+        url = repo_url or NIHIL_RESOURCES_REPO
+        target.parent.mkdir(parents=True, exist_ok=True)
+        print(self.formatter.info(f"Cloning {url} into {target}..."))
+        try:
+            subprocess.run(["git", "clone", url, str(target)], check=True)
+        except subprocess.CalledProcessError as e:
+            print(self.formatter.error(f"git clone failed (exit {e.returncode})."), file=sys.stderr)
+            return e.returncode or 1
+        print(self.formatter.success("nihil-resources installed."))
+        return 0
+
+    def _resources_update(self) -> int:
+        path = self.config.nihil_resources_path
+        if not (path / ".git").is_dir():
+            print(self.formatter.error(
+                f"No git repository at {path}. Run 'nihil resources install' first."
+            ), file=sys.stderr)
+            return 1
+        return self._nihil_resources_pull(path, quiet=False)
+
+    def _resources_sync(self, args) -> int:
+        import subprocess
+
+        path = self.config.nihil_resources_path
+        sync_script = path / "scripts" / "sync.py"
+        if not sync_script.is_file():
+            print(self.formatter.error(
+                f"sync.py not found at {sync_script}. Run 'nihil resources install' first."
+            ), file=sys.stderr)
+            return 1
+        cmd = [sys.executable, str(sync_script), "sync"]
+        profile = getattr(args, "profile", None)
+        if profile:
+            cmd.extend(["--profile", profile])
+        print(self.formatter.info(f"Running {' '.join(cmd)}..."))
+        try:
+            return subprocess.run(cmd, cwd=str(path)).returncode
+        except FileNotFoundError as e:
+            print(self.formatter.error(f"Failed to run sync.py: {e}"), file=sys.stderr)
+            return 1
+
+    def _resources_status(self) -> int:
+        import subprocess
+
+        path = self.config.nihil_resources_path
+        try:
+            from rich.console import Console
+            from rich.panel import Panel
+            from rich.table import Table
+        except ImportError:
+            Console = Panel = Table = None  # type: ignore
+        if not path.exists():
+            print(self.formatter.warning(f"Not installed: {path}"))
+            print(self.formatter.info("Run: nihil resources install"))
+            return 0
+        if not (path / ".git").is_dir():
+            print(self.formatter.warning(f"{path} exists but is not a git repository."))
+            return 0
+        def _git(*git_args: str) -> str:
+            try:
+                return subprocess.check_output(
+                    ["git", "-C", str(path), *git_args],
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                ).strip()
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                return ""
+        branch = _git("rev-parse", "--abbrev-ref", "HEAD") or "?"
+        last_commit = _git("log", "-1", "--format=%h %ai %s") or "?"
+        remote = _git("remote", "get-url", "origin") or "?"
+        dirty = _git("status", "--porcelain")
+        if Console is not None:
+            console = Console()
+            table = Table(show_header=False, box=None, padding=(0, 2))
+            table.add_column(style="bold cyan")
+            table.add_column(style="white")
+            table.add_row("Path", str(path))
+            table.add_row("Remote", remote)
+            table.add_row("Branch", branch)
+            table.add_row("Last commit", last_commit)
+            table.add_row("Working tree", "[red]dirty[/]" if dirty else "[green]clean[/]")
+            console.print(Panel(table, title="[bold]nihil-resources[/]", border_style="blue", padding=(0, 1)))
+        else:
+            print(f"Path:        {path}")
+            print(f"Remote:      {remote}")
+            print(f"Branch:      {branch}")
+            print(f"Last commit: {last_commit}")
+            print(f"Working tree: {'dirty' if dirty else 'clean'}")
+        return 0
+
+    def _nihil_resources_pull(self, path: Path, quiet: bool = False) -> int:
+        import subprocess
+
+        if not quiet:
+            print(self.formatter.info(f"git -C {path} pull --ff-only"))
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(path), "pull", "--ff-only"],
+                capture_output=quiet,
+                text=True,
+            )
+        except FileNotFoundError:
+            if not quiet:
+                print(self.formatter.error("git is required to update nihil-resources."), file=sys.stderr)
+            return 1
+        if result.returncode != 0:
+            if quiet:
+                # Erreur silencieuse (auto-update au start) : on prévient sans bloquer
+                print(self.formatter.warning(
+                    f"nihil-resources auto-update failed (exit {result.returncode}). Run 'nihil resources update' for details."
+                ))
+            else:
+                print(self.formatter.error(f"git pull failed (exit {result.returncode})."), file=sys.stderr)
+            return result.returncode
+        if not quiet:
+            print(self.formatter.success("nihil-resources up to date."))
         return 0
 
     def _cmd_completion(self, args) -> int:

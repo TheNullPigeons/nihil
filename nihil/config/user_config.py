@@ -31,6 +31,11 @@ _DEFAULT_CONFIG: dict = {
         "enabled": True,
         "path": str(NIHIL_HOME / "my-resources"),
     },
+    "nihil_resources": {
+        "enabled": True,
+        "path": str(NIHIL_HOME / "nihil-resources"),
+        "auto_update": False,
+    },
     "display": {
         "x11_by_default": True,
     },
@@ -53,6 +58,9 @@ _CONFIG_COMMENT = """\
 # shell.logging.method        : asciinema | script
 # my_resources.enabled        : mount ~/.nihil/my-resources in every container
 # my_resources.path           : custom path for my-resources
+# nihil_resources.enabled     : mount the shared nihil-resources catalog (read-only) in every container
+# nihil_resources.path        : local path of the cloned nihil-resources repository
+# nihil_resources.auto_update : git pull nihil-resources at every container start
 # display.x11_by_default      : enable X11 forwarding by default
 # updates.auto_check          : check for image updates on start
 # build.images_path           : path to nihil-images source directory (for nihil build)
@@ -153,6 +161,26 @@ class NihilConfig:
         if raw:
             return Path(raw).expanduser().resolve()
         return NIHIL_HOME / "my-resources"
+
+    # ------------------------------------------------------------------
+    # Propriétés: nihil_resources
+    # ------------------------------------------------------------------
+
+    @property
+    def nihil_resources_enabled(self) -> bool:
+        val = self._get("nihil_resources", "enabled")
+        return val if val is not None else True
+
+    @property
+    def nihil_resources_path(self) -> Path:
+        raw = self._get("nihil_resources", "path")
+        if raw:
+            return Path(raw).expanduser().resolve()
+        return NIHIL_HOME / "nihil-resources"
+
+    @property
+    def nihil_resources_auto_update(self) -> bool:
+        return bool(self._get("nihil_resources", "auto_update"))
 
     # ------------------------------------------------------------------
     # Propriétés: display
