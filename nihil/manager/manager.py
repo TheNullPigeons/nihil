@@ -15,7 +15,7 @@ from typing import Dict, List, Optional, Set
 
 import docker
 
-from nihil.config import ensure_filesystem, MY_RESOURCES_DIR
+from nihil.config import ensure_filesystem, MY_RESOURCES_DIR, NIHIL_RESOURCES_DIR
 from nihil.features.images import (
     DEFAULT_IMAGE,
     AVAILABLE_IMAGES,
@@ -145,6 +145,8 @@ class NihilManager:
         enable_x11: bool = False,
         disable_my_resources: bool = False,
         my_resources_path: Optional[Path] = None,
+        disable_nihil_resources: bool = False,
+        nihil_resources_path: Optional[Path] = None,
         browser_ui: bool = False,
         browser_ui_port: Optional[int] = None,
         browser_ui_password: Optional[str] = None,
@@ -240,6 +242,14 @@ class NihilManager:
             container_config["volumes"][str(effective_my_resources)] = {
                 "bind": "/opt/my-resources",
                 "mode": "rw"
+            }
+        effective_nihil_resources = nihil_resources_path if nihil_resources_path is not None else NIHIL_RESOURCES_DIR
+        if not disable_nihil_resources and effective_nihil_resources.exists():
+            if "volumes" not in container_config:
+                container_config["volumes"] = {}
+            container_config["volumes"][str(effective_nihil_resources)] = {
+                "bind": "/opt/resources",
+                "mode": "ro"
             }
         if vpn and vpn_config_path:
             container_config["cap_add"] = ["NET_ADMIN"]
