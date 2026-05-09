@@ -1213,9 +1213,9 @@ class NihilController:
             return 1
         url = repo_url or NIHIL_RESOURCES_REPO
         target.parent.mkdir(parents=True, exist_ok=True)
-        print(self.formatter.info(f"Cloning {url} into {target}..."))
+        print(self.formatter.info(f"Cloning {url} into {target} (with submodules)..."))
         try:
-            subprocess.run(["git", "clone", url, str(target)], check=True)
+            subprocess.run(["git", "clone", "--recurse-submodules", url, str(target)], check=True)
         except subprocess.CalledProcessError as e:
             print(self.formatter.error(f"git clone failed (exit {e.returncode})."), file=sys.stderr)
             return e.returncode or 1
@@ -1325,6 +1325,21 @@ class NihilController:
             else:
                 print(self.formatter.error(f"git pull failed (exit {result.returncode})."), file=sys.stderr)
             return result.returncode
+        if not quiet:
+            print(self.formatter.info(f"git -C {path} submodule update --init --recursive --remote --merge"))
+        sub_result = subprocess.run(
+            ["git", "-C", str(path), "submodule", "update", "--init", "--recursive", "--remote", "--merge"],
+            capture_output=quiet,
+            text=True,
+        )
+        if sub_result.returncode != 0:
+            if quiet:
+                print(self.formatter.warning(
+                    f"nihil-resources submodule update failed (exit {sub_result.returncode})."
+                ))
+            else:
+                print(self.formatter.error(f"submodule update failed (exit {sub_result.returncode})."), file=sys.stderr)
+            return sub_result.returncode
         if not quiet:
             print(self.formatter.success("nihil-resources up to date."))
         return 0
