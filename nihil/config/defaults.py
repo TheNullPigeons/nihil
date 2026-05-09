@@ -13,6 +13,10 @@ BROWSER_UI_PASSWORDS_FILE = NIHIL_HOME / "browser_ui_passwords.json"
 # Répertoire my-resources monté dans les containers
 MY_RESOURCES_DIR = NIHIL_HOME / "my-resources"
 
+# Répertoire et dépôt git du catalogue partagé nihil-resources
+NIHIL_RESOURCES_DIR = NIHIL_HOME / "nihil-resources"
+NIHIL_RESOURCES_REPO = "https://github.com/TheNullPigeons/nihil-resources.git"
+
 
 def ensure_filesystem() -> None:
     """Crée les répertoires et fichiers par défaut (~/.nihil/my-resources/setup/...)."""
