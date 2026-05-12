@@ -192,6 +192,129 @@ class TestNihilManager:
             with patch('nihil.manager.manager.ensure_filesystem'):
                 manager = NihilManager()
                 containers = manager.list_containers()
-                
+
                 assert len(containers) == 1
                 assert containers[0] == nihil_container
+
+    def test_get_image_version_reads_label(self, mock_docker_client):
+        """get_image_version retourne la valeur du label org.nihil.version."""
+        mock_image = MagicMock()
+        mock_image.attrs = {"Config": {"Labels": {"org.nihil.version": "1.2.3"}}}
+        mock_docker_client.images.get.return_value = mock_image
+
+        with patch('nihil.manager.manager.docker.from_env', return_value=mock_docker_client):
+            with patch('nihil.manager.manager.ensure_filesystem'):
+                manager = NihilManager()
+                assert manager.get_image_version("ghcr.io/thenullpigeons/full:latest") == "1.2.3"
+
+    def test_get_image_version_ignores_local(self, mock_docker_client):
+        """get_image_version retourne None pour les builds locaux."""
+        mock_image = MagicMock()
+        mock_image.attrs = {"Config": {"Labels": {"org.nihil.version": "local"}}}
+        mock_docker_client.images.get.return_value = mock_image
+
+        with patch('nihil.manager.manager.docker.from_env', return_value=mock_docker_client):
+            with patch('nihil.manager.manager.ensure_filesystem'):
+                manager = NihilManager()
+                assert manager.get_image_version("nihil/full:local") is None
+
+    def test_snapshot_local_image_retags_before_pull(self, mock_docker_client):
+        """snapshot_local_image_as_version retag l'image locale comme nihil/<variant>:<version>."""
+        mock_image = MagicMock()
+        mock_image.tags = ["ghcr.io/thenullpigeons/full:latest"]
+        mock_image.attrs = {"Config": {"Labels": {"org.nihil.version": "1.0.0", "org.nihil.variant": "full"}}}
+        mock_docker_client.images.get.return_value = mock_image
+
+        with patch('nihil.manager.manager.docker.from_env', return_value=mock_docker_client):
+            with patch('nihil.manager.manager.ensure_filesystem'):
+                manager = NihilManager()
+                new_tag = manager.snapshot_local_image_as_version("ghcr.io/thenullpigeons/full:latest")
+
+                assert new_tag == "nihil/full:1.0.0"
+                mock_image.tag.assert_called_once_with(repository="nihil/full", tag="1.0.0")
+
+    def test_snapshot_local_image_skips_when_no_version(self, mock_docker_client):
+        """snapshot_local_image_as_version ne fait rien si pas de label version."""
+        mock_image = MagicMock()
+        mock_image.tags = ["ghcr.io/thenullpigeons/full:latest"]
+        mock_image.attrs = {"Config": {"Labels": {}}}
+        mock_docker_client.images.get.return_value = mock_image
+
+        with patch('nihil.manager.manager.docker.from_env', return_value=mock_docker_client):
+            with patch('nihil.manager.manager.ensure_filesystem'):
+                manager = NihilManager()
+                assert manager.snapshot_local_image_as_version("ghcr.io/thenullpigeons/full:latest") is None
+                mock_image.tag.assert_not_called()
+
+    def test_is_container_image_current_true(self, mock_docker_client):
+        """is_container_image_current True quand l'image du container == :latest local."""
+        latest_img = MagicMock()
+        latest_img.id = "sha256:abc"
+        container_img = MagicMock()
+        container_img.id = "sha256:abc"
+        container_img.tags = ["ghcr.io/thenullpigeons/full:latest"]
+        container_img.attrs = {"Config": {"Labels": {"org.nihil.variant": "full"}}}
+        container = MagicMock()
+        container.image = container_img
+        container.attrs = {"Config": {"Image": "ghcr.io/thenullpigeons/full:latest"}}
+        mock_docker_client.images.get.return_value = latest_img
+
+        with patch('nihil.manager.manager.docker.from_env', return_value=mock_docker_client):
+            with patch('nihil.manager.manager.ensure_filesystem'):
+                manager = NihilManager()
+                assert manager.is_container_image_current(container) is True
+
+    def test_is_container_image_current_false(self, mock_docker_client):
+        """is_container_image_current False quand l'image du container != :latest local."""
+        latest_img = MagicMock()
+        latest_img.id = "sha256:new"
+        container_img = MagicMock()
+        container_img.id = "sha256:old"
+        container_img.tags = ["nihil/full:main"]
+        container_img.attrs = {"Config": {"Labels": {"org.nihil.variant": "full"}}}
+        container = MagicMock()
+        container.image = container_img
+        container.attrs = {"Config": {"Image": "ghcr.io/thenullpigeons/full:latest"}}
+        mock_docker_client.images.get.return_value = latest_img
+
+        with patch('nihil.manager.manager.docker.from_env', return_value=mock_docker_client):
+            with patch('nihil.manager.manager.ensure_filesystem'):
+                manager = NihilManager()
+                assert manager.is_container_image_current(container) is False
+
+    def test_display_version_stable_semver_unchanged(self, mock_docker_client):
+        """Une version semver (v1.2.3) est affichée telle quelle, sans short_id."""
+        mock_image = MagicMock()
+        mock_image.short_id = "sha256:abc123def456"
+        mock_image.attrs = {"Config": {"Labels": {"org.nihil.version": "v1.2.3"}}}
+        mock_docker_client.images.get.return_value = mock_image
+
+        with patch('nihil.manager.manager.docker.from_env', return_value=mock_docker_client):
+            with patch('nihil.manager.manager.ensure_filesystem'):
+                manager = NihilManager()
+                assert manager.get_image_display_version("ghcr.io/thenullpigeons/full:latest") == "v1.2.3"
+
+    def test_display_version_branch_appends_short_id(self, mock_docker_client):
+        """Une version de branche (main) est suffixée du short_id pour distinguer plusieurs builds."""
+        mock_image = MagicMock()
+        mock_image.short_id = "sha256:abc123def456"
+        mock_image.attrs = {"Config": {"Labels": {"org.nihil.version": "main"}}}
+        mock_docker_client.images.get.return_value = mock_image
+
+        with patch('nihil.manager.manager.docker.from_env', return_value=mock_docker_client):
+            with patch('nihil.manager.manager.ensure_filesystem'):
+                manager = NihilManager()
+                assert manager.get_image_display_version("ghcr.io/thenullpigeons/full:latest") == "main @abc123def456"
+
+    def test_snapshot_local_image_idempotent(self, mock_docker_client):
+        """snapshot_local_image_as_version ne re-tag pas si le tag existe déjà."""
+        mock_image = MagicMock()
+        mock_image.tags = ["ghcr.io/thenullpigeons/full:latest", "nihil/full:1.0.0"]
+        mock_image.attrs = {"Config": {"Labels": {"org.nihil.version": "1.0.0"}}}
+        mock_docker_client.images.get.return_value = mock_image
+
+        with patch('nihil.manager.manager.docker.from_env', return_value=mock_docker_client):
+            with patch('nihil.manager.manager.ensure_filesystem'):
+                manager = NihilManager()
+                assert manager.snapshot_local_image_as_version("ghcr.io/thenullpigeons/full:latest") == "nihil/full:1.0.0"
+                mock_image.tag.assert_not_called()
