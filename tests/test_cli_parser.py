@@ -104,6 +104,19 @@ class TestCreateParser:
         assert args.command == "update"
         assert args.image == "ctf"
 
+    def test_parse_upgrade_default_no_pull(self):
+        parser = create_parser()
+        args = parser.parse_args(["upgrade", "pentest"])
+        assert args.command == "upgrade"
+        assert args.names == ["pentest"]
+        assert args.pull is False
+        assert args.force is False
+
+    def test_parse_upgrade_with_pull(self):
+        parser = create_parser()
+        args = parser.parse_args(["upgrade", "pentest", "--pull"])
+        assert args.pull is True
+
     def test_parse_tools_ctf(self):
         parser = create_parser()
         args = parser.parse_args(["tools", "ctf"])

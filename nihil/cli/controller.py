@@ -320,6 +320,16 @@ class NihilController:
         name = container.name
         image_tag = container.image.tags[0] if container.image.tags else container.attrs.get("Config", {}).get("Image", "?")
         short_image = self.manager.short_image_name(image_tag)
+        try:
+            is_current = self.manager.is_container_image_current(container)
+        except Exception:
+            is_current = None
+        try:
+            image_version = self.manager.get_version_label(container, is_current)
+        except Exception:
+            image_version = None
+        if image_version:
+            short_image = f"{short_image} ({image_version})"
         cid = container.short_id
         attrs = container.attrs
         host_config = attrs.get("HostConfig") or {}
@@ -535,10 +545,14 @@ class NihilController:
 
             # Identifier les containers utilisant actuellement cette image (avant pull)
             old_id = None
+            old_version = None
+            old_display_version = None
             affected_containers: List[str] = []
             try:
                 old_img = self.manager.client.images.get(image_tag)
                 old_id = old_img.short_id
+                old_version = self.manager.get_image_version(old_img)
+                old_display_version = self.manager.get_image_display_version(old_img)
                 # Containers utilisant cette image (running ou stopped)
                 all_containers = self.manager.client.containers.list(all=True)
                 for c in all_containers:
@@ -549,25 +563,38 @@ class NihilController:
 
             print(self.formatter.info(f"Updating '{variant}' ({image_tag})..."))
             try:
+                # _pull_with_progress retag automatiquement l'image locale courante
+                # comme nihil/<variant>:<old_version> avant de récupérer la nouvelle.
                 self.manager._pull_with_progress(image_tag)
                 new_img = self.manager.client.images.get(image_tag)
                 new_id = new_img.short_id
+                new_version = self.manager.get_image_version(new_img)
+                new_display_version = self.manager.get_image_display_version(new_img)
                 if old_id and old_id == new_id:
-                    print(self.formatter.info(f"'{variant}' is already up to date."))
+                    label = new_display_version if new_display_version else "current"
+                    print(self.formatter.info(f"'{variant}' is already up to date ({label})."))
                 else:
-                    print(self.formatter.success(f"'{variant}' updated successfully."))
-                    # Si des containers utilisaient l'ancienne image, ils sont maintenant sur une image dangling
+                    transition = ""
+                    if old_display_version and new_display_version:
+                        transition = f" ({old_display_version} -> {new_display_version})"
+                    elif new_display_version:
+                        transition = f" (now {new_display_version})"
+                    print(self.formatter.success(f"'{variant}' updated successfully{transition}."))
+                    if old_version:
+                        print(self.formatter.info(
+                            f"Previous image preserved as 'nihil/{variant}:{old_version}'."
+                        ))
                     if affected_containers:
                         containers_to_upgrade.extend(affected_containers)
             except Exception as e:
                 print(self.formatter.error(f"Failed to update '{variant}': {e}"))
                 errors += 1
 
-        # Avertir l'utilisateur si des containers ont perdu leur tag
+        # Avertir l'utilisateur si des containers tournent encore sur l'ancienne image
         if containers_to_upgrade:
             print()
             print(self.formatter.warning(
-                f"The following container(s) are still using the old image (now untagged): "
+                f"The following container(s) still run on the previous image: "
                 f"{', '.join(containers_to_upgrade)}"
             ))
             print(self.formatter.warning(
@@ -596,9 +623,23 @@ class NihilController:
                     image_tag = c.image.tags[0] if c.image.tags else c.attrs["Config"]["Image"]
                 except Exception:
                     image_tag = c.attrs.get("Config", {}).get("Image", "<deleted image>")
-                rows.append([c.name, status, self.manager.short_image_name(image_tag)])
+                try:
+                    is_current = self.manager.is_container_image_current(c)
+                except Exception:
+                    is_current = None
+                try:
+                    version = self.manager.get_version_label(c, is_current) or "-"
+                except Exception:
+                    version = "-"
+                if is_current is True:
+                    update_cell = ("Current", self.formatter.GREEN)
+                elif is_current is False:
+                    update_cell = ("Outdated", self.formatter.YELLOW)
+                else:
+                    update_cell = "-"
+                rows.append([c.name, status, self.manager.short_image_name(image_tag), version, update_cell])
             print(self.formatter.section_header("NIHIL CONTAINERS", "🐳 "))
-            self.formatter.print_table(["NAME", "STATUS", "IMAGE"], rows)
+            self.formatter.print_table(["NAME", "STATUS", "IMAGE", "VERSION", "UPDATE"], rows)
             selected: List[str] = []
             while True:
                 available = [c.name for c in nihil_containers if c.name not in selected]
@@ -625,6 +666,10 @@ class NihilController:
                 return 0
             container_names = selected
 
+        do_pull = getattr(args, "pull", False)
+        force_upgrade = getattr(args, "force", False)
+        requested_img = getattr(args, "image", None)
+
         errors = 0
         for container_name in container_names:
             print()
@@ -637,54 +682,78 @@ class NihilController:
                 errors += 1
                 continue
 
-            # 2. Snapshot de la config
+            # 2. Snapshot de la config + déterminer l'image cible
             snapshot = self.manager.snapshot_container_config(container)
-            image_tag = snapshot["image"]
-            
-            # Normaliser vers latest pour nihil-images
-            if "nihil-images" in image_tag and ":" in image_tag:
-                repo = image_tag.split(":")[0]
-                target_image = f"{repo}:latest"
-            elif "nihil-images" in image_tag:
-                target_image = f"{image_tag}:latest"
-            else:
-                target_image = image_tag
+            current_image_tag = snapshot["image"]
 
-            requested_img = getattr(args, "image", None)
+            # Récupérer l'ID de l'image actuellement utilisée par le container (peut être dangling)
+            try:
+                old_id = container.image.id
+                old_short = container.image.short_id
+            except Exception:
+                old_id, old_short = None, None
+
+            # Déduire le variant (depuis label ou tag) pour cibler le :latest correspondant
+            current_labels = self.manager.get_image_labels(container.image) if old_id else {}
+            current_version = self.manager.get_image_version(container.image) if old_id else None
+            current_display_version = self.manager.get_image_display_version(container.image) if old_id else None
+            variant = self.manager._variant_for_image_tag(current_image_tag, current_labels)
+
             if requested_img:
-                target_image = self.manager.AVAILABLE_IMAGES.get(requested_img, target_image)
+                target_image = self.manager.AVAILABLE_IMAGES.get(requested_img, current_image_tag)
+            elif variant and variant in self.manager.AVAILABLE_IMAGES:
+                target_image = self.manager.AVAILABLE_IMAGES[variant]
+            else:
+                target_image = current_image_tag
 
             snapshot["image"] = target_image
 
-            print(self.formatter.info(f"Container image: {self.manager.short_image_name(image_tag)} ({image_tag})"))
-            if target_image != image_tag:
+            current_label = self.manager.short_image_name(current_image_tag)
+            if current_display_version:
+                current_label = f"{current_label} ({current_display_version})"
+            print(self.formatter.info(f"Container image: {current_label} ({current_image_tag})"))
+            if target_image != current_image_tag:
                 print(self.formatter.info(f"Targeting image: {target_image}"))
 
-            # 3. Pull la nouvelle image
-            old_id = None
-            try:
-                old_img = self.manager.client.images.get(image_tag)
-                old_id = old_img.short_id
-            except Exception:
-                pass
-            print(self.formatter.info("Pulling latest image..."))
-            try:
-                self.manager._pull_with_progress(target_image)
-            except Exception as e:
-                print(self.formatter.error(f"Failed to pull image '{target_image}': {e}"))
-                errors += 1
-                continue
+            # 3. Pull la nouvelle image (uniquement si --pull)
+            if do_pull:
+                print(self.formatter.info(f"Pulling '{target_image}'..."))
+                try:
+                    self.manager._pull_with_progress(target_image)
+                except Exception as e:
+                    print(self.formatter.error(f"Failed to pull image '{target_image}': {e}"))
+                    errors += 1
+                    continue
+            else:
+                # Vérifier que l'image cible est bien présente localement
+                try:
+                    self.manager.client.images.get(target_image)
+                except Exception:
+                    print(self.formatter.error(
+                        f"Image '{target_image}' not found locally. "
+                        f"Run 'nihil update' or 'nihil upgrade --pull' first."
+                    ))
+                    errors += 1
+                    continue
 
             new_id = None
+            new_short = None
+            new_version = None
+            new_display_version = None
             try:
                 new_img = self.manager.client.images.get(target_image)
-                new_id = new_img.short_id
+                new_id = new_img.id
+                new_short = new_img.short_id
+                new_version = self.manager.get_image_version(new_img)
+                new_display_version = self.manager.get_image_display_version(new_img)
             except Exception:
                 pass
 
-            force_upgrade = getattr(args, "force", False)
-            if old_id and old_id == new_id and image_tag == target_image and not force_upgrade:
-                print(self.formatter.info("Image is already up to date. Skipping container recreation. Use --force to recreate anyway."))
+            if old_id and new_id and old_id == new_id and not force_upgrade:
+                print(self.formatter.info(
+                    "Container is already running on this image. "
+                    "Use --force to recreate anyway, --pull to fetch a newer one."
+                ))
                 continue
 
             print(self.formatter.info("Backing up container specific files..."))
@@ -722,9 +791,15 @@ class NihilController:
                     print(self.formatter.info("Restoring container specific files..."))
                     self.manager.restore_container_data(new_container, saved_files)
 
+                old_label = f"{old_short or '?'}"
+                if current_display_version:
+                    old_label = f"{old_label} {current_display_version}"
+                new_label = f"{new_short or '?'}"
+                if new_display_version:
+                    new_label = f"{new_label} {new_display_version}"
                 print(self.formatter.success(
                     f"Container '{container_name}' upgraded and restarted successfully "
-                    f"({old_id or '?'} → {new_id or '?'})."
+                    f"({old_label} → {new_label})."
                 ))
             except Exception as e:
                 print(self.formatter.error(f"Failed to recreate container '{container_name}': {e}"))
@@ -913,8 +988,10 @@ class NihilController:
             description = variant_descriptions.get(variant, "Local build")
             info = self.manager.get_image_info(image_url)
             size_str = f"{info['size_bytes'] / (1024**3):.2f} GB" if info else "-"
-            rows.append([variant, self.manager.short_image_name(image_url), size_str, description])
-        self.formatter.print_table(["VARIANT", "IMAGE", "SIZE", "DESCRIPTION"], rows)
+            # AVAILABLE liste les :latest courants : pas besoin de @short_id de disambiguation
+            version = self.manager.get_image_version(image_url) or "-"
+            rows.append([variant, self.manager.short_image_name(image_url), version, size_str, description])
+        self.formatter.print_table(["VARIANT", "IMAGE", "VERSION", "SIZE", "DESCRIPTION"], rows)
         print()
         print(self.formatter.info("Usage: nihil start <name> --image <variant>"))
         return 0
@@ -946,21 +1023,32 @@ class NihilController:
             description = variant_descriptions.get(variant, "Local build")
             info = self.manager.get_image_info(image_url)
             size_str = f"{info['size_bytes'] / (1024**3):.2f} GB" if info else "-"
-            rows.append([variant, self.manager.short_image_name(image_url), size_str, description])
-        self.formatter.print_table(["VARIANT", "IMAGE", "SIZE", "DESCRIPTION"], rows)
+            # AVAILABLE liste les :latest courants : pas besoin de @short_id de disambiguation
+            version = self.manager.get_image_version(image_url) or "-"
+            rows.append([variant, self.manager.short_image_name(image_url), version, size_str, description])
+        self.formatter.print_table(["VARIANT", "IMAGE", "VERSION", "SIZE", "DESCRIPTION"], rows)
         print()
         print(self.formatter.info("Use 'nihil start <name> --image <variant>' to create a container with a specific image."))
         print()
         print(self.formatter.section_header("INSTALLED IMAGES"))
         images = self.manager.list_images()
         if images:
+            # IDs des :latest courants pour chaque variant connu : sert à ne suffixer @<short_id> que sur les images dépassées
+            current_latest_ids = set()
+            for _variant, _tag in self.manager.AVAILABLE_IMAGES.items():
+                try:
+                    current_latest_ids.add(self.manager.client.images.get(_tag).id)
+                except Exception:
+                    pass
             rows = []
             for img in images:
                 tags = img.tags if img.tags else []
                 short = ", ".join(self.manager.short_image_name(t) for t in tags) or img.short_id
+                is_current = img.id in current_latest_ids
+                version = self.manager.get_version_label(img, is_current) or "-"
                 size = f"{img.attrs['Size'] / (1024**3):.2f} GB"
-                rows.append([short, size])
-            self.formatter.print_table(["IMAGE", "SIZE"], rows, [50, 12])
+                rows.append([short, version, size])
+            self.formatter.print_table(["IMAGE", "VERSION", "SIZE"], rows, [40, 30, 12])
         else:
             print("  No nihil images installed locally.")
             print("  Use 'nihil start <name> --image <variant>' to pull and use an image.")
@@ -987,9 +1075,25 @@ class NihilController:
                         image = image.replace("nihil-images-", "", 1).replace("nihil-images", "full", 1)
                 else:
                     image = image_raw
+                try:
+                    is_current = self.manager.is_container_image_current(c)
+                except Exception:
+                    is_current = None
+                try:
+                    container_version = self.manager.get_version_label(c, is_current)
+                except Exception:
+                    container_version = None
+                if container_version:
+                    image = f"{image} ({container_version})"
+                if is_current is True:
+                    update_cell = ("Current", self.formatter.GREEN)
+                elif is_current is False:
+                    update_cell = ("Outdated", self.formatter.YELLOW)
+                else:
+                    update_cell = "-"
                 is_privileged = c.attrs['HostConfig']['Privileged']
                 config = ("Privileged 💥", self.formatter.RED) if is_privileged else "Standard"
-                rows.append([name, status, image, config])
+                rows.append([name, status, image, update_cell, config])
             def get_text_length(cell):
                 if isinstance(cell, tuple):
                     return len(str(cell[0]))
@@ -997,8 +1101,9 @@ class NihilController:
             name_width = max(len("NAME"), max(get_text_length(row[0]) for row in rows)) + 2
             status_width = max(len("STATUS"), max(get_text_length(row[1]) for row in rows)) + 2
             image_width = max(len("IMAGE"), max(get_text_length(row[2]) for row in rows)) + 2
-            config_width = max(len("CONFIG"), max(get_text_length(row[3]) for row in rows)) + 2
-            self.formatter.print_table(["NAME", "STATUS", "IMAGE", "CONFIG"], rows, [name_width, status_width, image_width, config_width])
+            update_width = max(len("UPDATE"), max(get_text_length(row[3]) for row in rows)) + 2
+            config_width = max(len("CONFIG"), max(get_text_length(row[4]) for row in rows)) + 2
+            self.formatter.print_table(["NAME", "STATUS", "IMAGE", "UPDATE", "CONFIG"], rows, [name_width, status_width, image_width, update_width, config_width])
         else:
             print("  No nihil containers found.")
         return 0
