@@ -66,7 +66,154 @@ class NihilManager:
             except docker.errors.APIError as e:
                 raise ImagePullFailed(image=image, message=f"Failed to pull image '{image}': {e}")
 
+    def get_image_labels(self, image_or_tag) -> Dict[str, str]:
+        """Retourne les labels d'une image (objet docker.Image ou tag string)."""
+        try:
+            img = image_or_tag if hasattr(image_or_tag, "attrs") else self.client.images.get(image_or_tag)
+            return img.attrs.get("Config", {}).get("Labels") or {}
+        except docker.errors.ImageNotFound:
+            return {}
+        except docker.errors.APIError:
+            return {}
+
+    def get_image_version(self, image_or_tag) -> Optional[str]:
+        """Retourne org.nihil.version pour l'image (None si absent/local)."""
+        version = self.get_image_labels(image_or_tag).get("org.nihil.version")
+        if not version or version == "local":
+            return None
+        return version
+
+    @staticmethod
+    def _is_stable_version(version: str) -> bool:
+        """True si la version ressemble à un release tag (1.2.3, v1.2.3), False pour une ref mouvante (main, dev, etc.)."""
+        v = version[1:] if version.startswith("v") else version
+        return bool(v) and v[0].isdigit() and "." in v
+
+    def get_version_label(self, image_or_container, is_current: Optional[bool]) -> Optional[str]:
+        """Label de version à afficher (None = ne rien afficher).
+
+        Règles :
+        - Version stable (v1.2.3) : toujours affichée, jamais suffixée d'un short_id.
+        - Version non-stable (branche genre 'main') :
+            - is_current=True  -> None (info redondante avec le badge 'Current').
+            - is_current=False -> 'main @<short_id>' pour distinguer plusieurs builds.
+            - is_current=None  -> 'main @<short_id>' aussi (par sécurité).
+        """
+        image = getattr(image_or_container, "image", image_or_container)
+        version = self.get_image_version(image)
+        if not version:
+            return None
+        if self._is_stable_version(version):
+            return version
+        if is_current is True:
+            return None
+        return self.get_image_display_version(image)
+
+    def is_container_image_current(self, container) -> Optional[bool]:
+        """True si l'image du container est l'image :latest locale du variant.
+
+        False si elle est plus ancienne (un nouveau pull a eu lieu depuis), None si
+        on ne peut pas déterminer (variant inconnu, image latest absente, etc.).
+        """
+        try:
+            container_image_id = container.image.id
+        except Exception:
+            return None
+        if not container_image_id:
+            return None
+        try:
+            tag_used = container.image.tags[0] if container.image.tags else container.attrs.get("Config", {}).get("Image", "")
+        except Exception:
+            tag_used = ""
+        labels = self.get_image_labels(container.image)
+        variant = self._variant_for_image_tag(tag_used, labels)
+        if not variant:
+            return None
+        latest_tag = self.AVAILABLE_IMAGES.get(variant)
+        if not latest_tag:
+            return None
+        try:
+            latest_img = self.client.images.get(latest_tag)
+        except (docker.errors.ImageNotFound, docker.errors.APIError):
+            return None
+        return container_image_id == latest_img.id
+
+    def get_image_display_version(self, image_or_tag) -> Optional[str]:
+        """Version affichable : suffixe le short_id quand le label n'est pas un tag stable.
+
+        Pour les release tags (v1.2.3), retourne la version telle quelle car le tag git
+        est déjà unique. Pour une ref mouvante (main, dev), suffixe avec @<short_id>
+        pour distinguer plusieurs builds successifs de la même branche.
+        """
+        version = self.get_image_version(image_or_tag)
+        if not version:
+            return None
+        if self._is_stable_version(version):
+            return version
+        try:
+            img = image_or_tag if hasattr(image_or_tag, "short_id") else self.client.images.get(image_or_tag)
+            short = img.short_id
+            if short.startswith("sha256:"):
+                short = short[len("sha256:"):]
+            return f"{version} @{short}"
+        except (docker.errors.ImageNotFound, docker.errors.APIError):
+            return version
+
+    def _variant_for_image_tag(self, image_tag: str, labels: Optional[Dict[str, str]] = None) -> Optional[str]:
+        """Déduit le variant ('full', 'ad', ...) depuis un tag d'image ou ses labels."""
+        if labels is None:
+            labels = {}
+        variant = labels.get("org.nihil.variant")
+        if variant:
+            return variant
+        if image_tag.startswith("nihil/"):
+            rest = image_tag[len("nihil/"):]
+            return rest.partition(":")[0] or None
+        repo_in = image_tag.rsplit(":", 1)[0]
+        for v, tag in self.AVAILABLE_IMAGES.items():
+            if tag.rsplit(":", 1)[0] == repo_in:
+                return v
+        return None
+
+    def snapshot_local_image_as_version(self, image_tag: str) -> Optional[str]:
+        """Avant un pull qui va écraser le tag courant, retag l'image locale comme nihil/<variant>:<version>.
+
+        Permet de conserver une référence nommée vers l'ancienne version au lieu de la rendre dangling.
+        Retourne le nouveau tag créé, ou None si rien à faire.
+        """
+        try:
+            img = self.client.images.get(image_tag)
+        except docker.errors.ImageNotFound:
+            return None
+        except docker.errors.APIError:
+            return None
+
+        labels = self.get_image_labels(img)
+        version = self.get_image_version(img)
+        if not version:
+            return None
+        variant = self._variant_for_image_tag(image_tag, labels)
+        if not variant:
+            return None
+
+        # Sanitize version pour usage en tag docker (alphanum, '.', '-', '_')
+        safe_version = "".join(c if (c.isalnum() or c in "._-") else "_" for c in version)
+        if not safe_version:
+            return None
+
+        new_tag = f"nihil/{variant}:{safe_version}"
+        if new_tag in (img.tags or []):
+            return new_tag
+        try:
+            img.tag(repository=f"nihil/{variant}", tag=safe_version)
+            return new_tag
+        except docker.errors.APIError:
+            return None
+
     def _pull_with_progress(self, image: str) -> None:
+        # Préserve une référence nommée vers l'image locale courante avant de pull
+        # (sinon elle deviendrait dangling quand le tag :latest sera réassigné).
+        self.snapshot_local_image_as_version(image)
         from rich.progress import (
             Progress,
             BarColumn,
