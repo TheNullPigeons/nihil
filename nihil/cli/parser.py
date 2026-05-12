@@ -84,9 +84,10 @@ Examples:
     update_parser = subparsers.add_parser("update", help="Update installed nihil images")
     update_parser.add_argument("image", choices=["full", "ad", "web", "ctf"], nargs="?", default=None, help="Image variant to update. If not specified, all installed images are updated.")
 
-    upgrade_parser = subparsers.add_parser("upgrade", help="Upgrade one or more containers to the latest image version")
+    upgrade_parser = subparsers.add_parser("upgrade", help="Recreate one or more containers from the current local image (use --pull to also fetch the latest from the registry)")
     upgrade_parser.add_argument("names", nargs="*", help="Container name(s) to upgrade. If not specified, prompted to select.")
     upgrade_parser.add_argument("--force", "-f", action="store_true", help="Force upgrade/recreation even if image is already up to date")
+    upgrade_parser.add_argument("--pull", "-p", action="store_true", help="Pull the latest image from the registry before recreating (default: use the existing local image)")
     upgrade_parser.add_argument("--image", "-i", choices=["full", "ad", "web", "ctf"], default=None, help="Change the container's image variant to the specified one during the upgrade.")
 
     exec_parser = subparsers.add_parser("exec", help="Execute a command in a container")
