@@ -242,6 +242,16 @@ class NihilController:
             print(self.formatter.info(f"Starting container '{container_name}'..."))
             self.manager.start_container(container)
             print(self.formatter.success(f"Container '{container_name}' created and started successfully."))
+            if not getattr(args, "no_my_resources", False):
+                try:
+                    output = self.manager.run_user_setup_script(container)
+                    if output is not None:
+                        print(self.formatter.info("Running load_user_setup.sh..."))
+                        if output:
+                            print(output)
+                        print(self.formatter.success("User setup script completed."))
+                except RuntimeError as e:
+                    print(self.formatter.warning(f"User setup script failed: {e}"))
             if not (browser_ui_enabled and not args.no_shell):
                 self._print_container_info(container, args, created=True, update_available=get_update(container))
         if not args.no_shell:
