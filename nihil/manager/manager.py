@@ -576,6 +576,29 @@ class NihilManager:
         except Exception:
             return False
 
+    def run_user_setup_script(self, container) -> Optional[str]:
+        """Exécute /opt/my-resources/setup/load_user_setup.sh dans le container.
+
+        Retourne la sortie (stdout+stderr) si le script existe, None sinon.
+        Lève une exception si le script existe mais échoue (exit code != 0).
+        """
+        script = "/opt/my-resources/setup/load_user_setup.sh"
+        try:
+            exit_code, _ = container.exec_run(f"test -f {script}")
+            if exit_code != 0:
+                return None
+            exit_code, output = container.exec_run(
+                ["bash", script], stdout=True, stderr=True
+            )
+            decoded = output.decode("utf-8", errors="replace").strip() if output else ""
+            if exit_code != 0:
+                raise RuntimeError(decoded or f"script exited with code {exit_code}")
+            return decoded
+        except RuntimeError:
+            raise
+        except Exception as e:
+            raise RuntimeError(str(e)) from e
+
     def copy_file_into_container(self, container, host_path: str, container_path: str) -> bool:
         try:
             path = Path(host_path).expanduser().resolve()
