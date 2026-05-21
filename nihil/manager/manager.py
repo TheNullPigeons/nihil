@@ -9,13 +9,12 @@ import shutil
 import subprocess
 import sys
 import tarfile
-import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 
 import docker
 
-from nihil.config import ensure_filesystem, MY_RESOURCES_DIR, NIHIL_RESOURCES_DIR
+from nihil.config import ensure_filesystem, MY_RESOURCES_DIR, NIHIL_RESOURCES_DIR, NIHIL_HOME
 from nihil.features.images import (
     DEFAULT_IMAGE,
     AVAILABLE_IMAGES,
@@ -375,19 +374,15 @@ class NihilManager:
                             stderr=subprocess.DEVNULL,
                         )
                     else:
-                        xauth = os.environ.get("XAUTHORITY") or str(Path.home() / ".Xauthority")
-                        xauth_path = Path(xauth).expanduser()
-                        if xauth_path.is_file():
+                        xauth_stable = str(NIHIL_HOME / ".xauth")
+                        if self._refresh_xauth(xauth_stable):
                             if "volumes" not in container_config:
                                 container_config["volumes"] = {}
-                            xauth_tmp_fd, xauth_tmp = tempfile.mkstemp(prefix=".nihil_xauth_")
-                            os.close(xauth_tmp_fd)
-                            shutil.copy2(str(xauth_path), xauth_tmp)
-                            container_config["volumes"][xauth_tmp] = {
-                                "bind": xauth_tmp,
+                            container_config["volumes"][xauth_stable] = {
+                                "bind": xauth_stable,
                                 "mode": "ro",
                             }
-                            container_config["environment"]["XAUTHORITY"] = xauth_tmp
+                            container_config["environment"]["XAUTHORITY"] = xauth_stable
         effective_my_resources = my_resources_path if my_resources_path is not None else MY_RESOURCES_DIR
         if not disable_my_resources and effective_my_resources.exists():
             if "volumes" not in container_config:
@@ -437,7 +432,20 @@ class NihilManager:
         except docker.errors.APIError as e:
             raise ContainerCreateFailed(name=name, message=f"Erreur création conteneur: {e}")
 
+    def _refresh_xauth(self, dest: str) -> bool:
+        xauth = os.environ.get("XAUTHORITY") or str(Path.home() / ".Xauthority")
+        xauth_path = Path(xauth).expanduser()
+        if not xauth_path.is_file():
+            return False
+        shutil.copy2(str(xauth_path), dest)
+        return True
+
     def start_container(self, container) -> bool:
+        env_list = container.attrs.get("Config", {}).get("Env") or []
+        xauth_stable = str(NIHIL_HOME / ".xauth")
+        uses_nihil_xauth = any(e == f"XAUTHORITY={xauth_stable}" for e in env_list)
+        if uses_nihil_xauth:
+            self._refresh_xauth(xauth_stable)
         try:
             container.start()
             return True
