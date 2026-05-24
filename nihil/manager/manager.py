@@ -442,10 +442,17 @@ class NihilManager:
 
     def start_container(self, container) -> bool:
         env_list = container.attrs.get("Config", {}).get("Env") or []
+        env_dict = dict(kv.split("=", 1) for kv in env_list if "=" in kv)
         xauth_stable = str(NIHIL_HOME / ".xauth")
         uses_nihil_xauth = any(e == f"XAUTHORITY={xauth_stable}" for e in env_list)
         if uses_nihil_xauth:
             self._refresh_xauth(xauth_stable)
+        if "DISPLAY" in env_dict and shutil.which("xhost"):
+            subprocess.run(
+                ["xhost", "+si:localuser:root"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
         try:
             container.start()
             return True
