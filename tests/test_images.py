@@ -51,8 +51,8 @@ class TestShortImageName:
     def test_known_blueteam_returns_blueteam(self):
         assert short_image_name("ghcr.io/thenullpigeons/blueteam:latest") == "blueteam"
 
-    def test_known_blueteam_defender_returns_blueteam(self):
-        assert short_image_name("ghcr.io/thenullpigeons/blueteam:defender") == "blueteam"
+    def test_known_blueteam_coo_returns_blueteam(self):
+        assert short_image_name("ghcr.io/thenullpigeons/blueteam:coo") == "blueteam"
 
     def test_unknown_with_slash_uses_last_part(self):
         assert short_image_name("registry/foo/bar:v1") == "bar:v1"
