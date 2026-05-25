@@ -171,8 +171,8 @@ class NihilController:
                         desc = "Active Directory tools"
                     elif "web" in variant:
                         desc = "Web Hacking tools"
-                    elif "ctf" in variant:
-                        desc = "Capture The Flag tools"
+                    elif "blueteam" in variant:
+                        desc = "Blue Team / DFIR tools"
                     else:
                         desc = "The whole flock"
                     image_tag = all_variants[variant]
@@ -990,7 +990,7 @@ class NihilController:
             "full": "The whole flock, every tool, every module",
             "ad": "Nest in their Active Directory",
             "web": "Beak through their web apps",
-            "ctf": "Capture the flag, no fluff",
+            "blueteam": "Blue Team, DFIR and threat hunting",
         }
         local_v = self.manager.list_local_variants()
         all_v = {**self.manager.AVAILABLE_IMAGES, **{k: v for k, v in local_v.items() if k not in self.manager.AVAILABLE_IMAGES}}
@@ -1021,7 +1021,7 @@ class NihilController:
             "full": "The whole flock, every tool, every module",
             "ad": "Nest in their Active Directory",
             "web": "Beak through their web apps",
-            "ctf": "Capture the flag, no fluff",
+            "blueteam": "Blue Team, DFIR and threat hunting",
         }
         print(self.formatter.section_header("AVAILABLE IMAGE VARIANTS"))
         rows = []
@@ -1161,11 +1161,11 @@ class NihilController:
         from datetime import datetime, timezone
 
         DOCKERFILES = {
-            "full": "Dockerfile",
-            "ad":   "Dockerfile.ad",
-            "ctf":  "Dockerfile.ctf",
-            "web":  "Dockerfile.web",
-            "test": "Dockerfile.test",
+            "full":     "Dockerfile",
+            "ad":       "Dockerfile.ad",
+            "blueteam": "Dockerfile.blueteam",
+            "web":      "Dockerfile.web",
+            "test":     "Dockerfile.test",
         }
 
         variant = args.variant or "full"
