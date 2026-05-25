@@ -22,7 +22,7 @@ SHORT_NAMES = {
     "ghcr.io/thenullpigeons/web:latest": "web",
     "ghcr.io/thenullpigeons/web:beak": "web",
     "ghcr.io/thenullpigeons/blueteam:latest": "blueteam",
-    "ghcr.io/thenullpigeons/blueteam:defender": "blueteam",
+    "ghcr.io/thenullpigeons/blueteam:coo": "blueteam",
 }
 
 
