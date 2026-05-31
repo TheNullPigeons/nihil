@@ -811,7 +811,7 @@ class NihilManager:
                 image_id = img_obj.id
             except docker.errors.ImageNotFound:
                 raise ImageRemoveFailed(image=image, message=f"Image '{image}' not found locally.")
-            self.client.images.remove(image=image_id, force=False, noprune=False)
+            self.client.images.remove(image=image_id, force=force, noprune=False)
             return True
         except docker.errors.APIError as e:
             if e.response.status_code == 409:

@@ -886,26 +886,44 @@ class NihilController:
                 else:
                     resolved_images.append(item)
         images = resolved_images
-        containers_to_remove = []
+        # Map each image ref to its local id so we can match containers robustly.
+        image_ids = {}
         for image in images:
             try:
-                img_obj = self.manager.client.images.get(image)
-                all_containers = self.manager.client.containers.list(all=True)
-                for c in all_containers:
-                    if c.image.id == img_obj.id:
-                        containers_to_remove.append(c.name)
+                image_ids[image] = self.manager.client.images.get(image).id
             except Exception:
-                pass
+                image_ids[image] = None
+        target_ids = {i for i in image_ids.values() if i}
+        # Detect containers using any of the target images. Each container is probed
+        # in its own try/except so a single dangling-image container cannot abort the
+        # whole scan (which would silently leave the image in use).
+        containers_to_remove = []
+        try:
+            all_containers = self.manager.client.containers.list(all=True)
+        except Exception:
+            all_containers = []
+        for c in all_containers:
+            try:
+                used_id = c.attrs.get("Image") or (c.image.id if c.image else None)
+                config_image = c.attrs.get("Config", {}).get("Image", "")
+                if used_id in target_ids or config_image in images:
+                    containers_to_remove.append(c.name)
+            except Exception:
+                continue
         print(self.formatter.warning(f"Images to be removed: {', '.join(images)}"))
         if containers_to_remove:
-            print(self.formatter.warning(f"The following containers are using these images:"))
+            print(self.formatter.warning("The following containers are using these images:"))
             for container_name in containers_to_remove:
                 print(f"  • {container_name}")
             print()
-            try:
-                remove_containers = input(self.formatter.info("Do you want to remove these containers too? [y/N] "))
-            except EOFError:
-                remove_containers = 'n'
+            if args.force:
+                remove_containers = 'y'
+                print(self.formatter.info("--force: removing these containers automatically."))
+            else:
+                try:
+                    remove_containers = input(self.formatter.info("Do you want to remove these containers too? [y/N] "))
+                except EOFError:
+                    remove_containers = 'n'
             if remove_containers.lower() in ['y', 'yes']:
                 print()
                 for container_name in containers_to_remove:
@@ -924,15 +942,14 @@ class NihilController:
             else:
                 print(self.formatter.error("Cannot remove images while containers are using them. Aborting."))
                 return 1
-        if args.force:
-            print(self.formatter.warning("--force flag is set (not needed if containers were removed)"))
-        try:
-            confirm = input(self.formatter.info("Proceed with image removal? [y/N] "))
-        except EOFError:
-            confirm = 'n'
-        if confirm.lower() not in ['y', 'yes']:
-            print("Aborted.")
-            return 0
+        if not args.force:
+            try:
+                confirm = input(self.formatter.info("Proceed with image removal? [y/N] "))
+            except EOFError:
+                confirm = 'n'
+            if confirm.lower() not in ['y', 'yes']:
+                print("Aborted.")
+                return 0
         errors = 0
         for image in images:
             print(self.formatter.info(f"Removing image '{image}'..."))
