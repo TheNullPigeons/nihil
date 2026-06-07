@@ -63,7 +63,13 @@ class TestCreateParser:
         parser = create_parser()
         args = parser.parse_args(["stop", "c1"])
         assert args.command == "stop"
-        assert args.name == "c1"
+        assert args.names == ["c1"]
+
+    def test_parse_stop_multiple(self):
+        parser = create_parser()
+        args = parser.parse_args(["stop", "a", "b", "c"])
+        assert args.command == "stop"
+        assert args.names == ["a", "b", "c"]
 
     def test_parse_remove(self):
         parser = create_parser()
