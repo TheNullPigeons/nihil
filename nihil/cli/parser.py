@@ -67,8 +67,8 @@ Examples:
     start_parser.add_argument("--log", "-l", action="store_true", help="Enable shell logging (asciinema)")
     start_parser.add_argument("--no-shell", action="store_true", help="Don't open shell after starting")
 
-    stop_parser = subparsers.add_parser("stop", help="Stop a container")
-    stop_parser.add_argument("name", help="Container name")
+    stop_parser = subparsers.add_parser("stop", help="Stop one or more containers")
+    stop_parser.add_argument("names", nargs="+", help="Container name(s)")
 
     remove_parser = subparsers.add_parser("remove", help="Remove one or more containers")
     remove_parser.add_argument("names", nargs="*", help="Container name(s)")

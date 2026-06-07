@@ -434,18 +434,20 @@ class NihilController:
         Console().print(Panel(table, title=f"[bold]{title}[/]", border_style="blue", padding=(0, 1)))
 
     def _cmd_stop(self, args) -> int:
-        container_name = args.name
-        container = self.manager.get_container(container_name)
-        if not container:
-            print(self.formatter.error(f"Container '{container_name}' doesn't exist."), file=sys.stderr)
-            return 1
-        if container.status != "running":
-            print(self.formatter.warning(f"Container '{container_name}' is not running."))
-            return 0
-        print(self.formatter.info(f"Stopping container '{container_name}'..."))
-        self.manager.stop_container(container)
-        print(self.formatter.success(f"Container '{container_name}' stopped successfully."))
-        return 0
+        errors = 0
+        for container_name in args.names:
+            container = self.manager.get_container(container_name)
+            if not container:
+                print(self.formatter.error(f"Container '{container_name}' doesn't exist."), file=sys.stderr)
+                errors += 1
+                continue
+            if container.status != "running":
+                print(self.formatter.warning(f"Container '{container_name}' is not running."))
+                continue
+            print(self.formatter.info(f"Stopping container '{container_name}'..."))
+            self.manager.stop_container(container)
+            print(self.formatter.success(f"Container '{container_name}' stopped successfully."))
+        return 1 if errors > 0 else 0
 
     def _cmd_remove(self, args) -> int:
         container_names = args.names
