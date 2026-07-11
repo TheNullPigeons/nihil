@@ -82,8 +82,9 @@ class TestCreateParser:
         parser = create_parser()
         args = parser.parse_args(["exec", "c1", "bash"])
         assert args.name == "c1"
-        # command (nargs="*") contient la commande à exécuter
-        assert args.command == ["bash"]
+        # exec_command (nargs="*") contient la commande à exécuter
+        assert args.exec_command == ["bash"]
+        assert args.command == "exec"
 
     def test_parse_install(self):
         parser = create_parser()
