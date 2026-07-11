@@ -92,7 +92,7 @@ Examples:
 
     exec_parser = subparsers.add_parser("exec", help="Execute a command in a container")
     exec_parser.add_argument("name", help="Container name")
-    exec_parser.add_argument("command", nargs="*", help="Command to execute (default: zsh)")
+    exec_parser.add_argument("exec_command", nargs="*", help="Command to execute (default: zsh)")
 
     tools_parser = subparsers.add_parser("tools", help="List tools available in a nihil image")
     tools_parser.add_argument("image", choices=["full", "ad", "active-directory", "web", "blueteam"], nargs="?", default=None, help="Image variant (default: full)")
