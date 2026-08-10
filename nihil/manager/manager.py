@@ -633,10 +633,15 @@ class NihilManager:
     def exec_in_container(self, container, command: str = "zsh"):
         import subprocess
         import shlex
+        import signal
         container_id = container.id
         cmd_args = shlex.split(command)
         full_command = ["docker", "exec", "-it", container_id] + cmd_args
-        subprocess.run(full_command)
+        old = signal.signal(signal.SIGINT, signal.SIG_IGN)
+        try:
+            subprocess.run(full_command)
+        finally:
+            signal.signal(signal.SIGINT, old)
 
     def check_image_update(self, image_tag: str) -> Optional[bool]:
         """Retourne True si une mise à jour est disponible, False si à jour, None si le check a échoué."""
