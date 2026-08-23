@@ -222,9 +222,11 @@ class NihilManager:
             TextColumn,
         )
         from rich.console import Console
+        from nihil.utils.platform_info import get_image_platform
         console = Console()
         tasks: dict = {}
         totals: dict = {}
+        image_platform = get_image_platform()
         with Progress(
             TextColumn("[bold cyan]{task.fields[layer]:<14}[/]"),
             TextColumn("[bold white]{task.fields[status]:<20}[/]"),
@@ -235,7 +237,10 @@ class NihilManager:
             console=console,
             transient=False,
         ) as progress:
-            for event in self.client.api.pull(image, stream=True, decode=True):
+            pull_options = {"stream": True, "decode": True}
+            if image_platform:
+                pull_options["platform"] = image_platform
+            for event in self.client.api.pull(image, **pull_options):
                 layer_id = event.get("id", "")
                 status = event.get("status", "")
                 detail = event.get("progressDetail") or {}
@@ -426,6 +431,10 @@ class NihilManager:
                 host_binding = ("127.0.0.1", browser_ui_port)
                 container_config["ports"] = container_config.get("ports") or {}
                 container_config["ports"][port_key] = host_binding
+        from nihil.utils.platform_info import get_image_platform
+        image_platform = get_image_platform()
+        if image_platform:
+            container_config["platform"] = image_platform
         try:
             container = self.client.containers.create(**container_config)
             return container

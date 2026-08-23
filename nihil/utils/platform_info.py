@@ -4,6 +4,7 @@
 
 import platform
 from enum import Enum
+from typing import Optional
 
 
 class HostOS(Enum):
@@ -53,3 +54,14 @@ def host_network_supported(host_os: HostOS, engine: DockerEngine) -> bool:
     if host_os == HostOS.WSL and engine == DockerEngine.NATIVE:
         return True
     return False
+
+
+NIHIL_IMAGE_PLATFORM = "linux/amd64"
+
+
+def get_image_platform() -> Optional[str]:
+    """Return the Nihil image platform required by the current host."""
+    machine = platform.machine().lower()
+    if machine in ("arm64", "aarch64"):
+        return NIHIL_IMAGE_PLATFORM
+    return None
