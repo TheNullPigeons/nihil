@@ -65,6 +65,36 @@ class TestNihilManager:
                         assert result is True
                         mock_pull.assert_called_once_with("test-image:latest")
     
+    def test_pull_with_progress_sets_platform_on_arm(self, mock_docker_client):
+        """Test pull force linux/amd64 sur un hôte ARM."""
+        mock_docker_client.api.pull.return_value = []
+
+        with patch('nihil.manager.manager.docker.from_env', return_value=mock_docker_client):
+            with patch('nihil.manager.manager.ensure_filesystem'):
+                with patch('nihil.utils.platform_info.get_image_platform', return_value='linux/amd64'):
+                    with patch.object(NihilManager, 'snapshot_local_image_as_version'):
+                        manager = NihilManager()
+                        manager._pull_with_progress("test-image:latest")
+
+        mock_docker_client.api.pull.assert_called_once_with(
+            "test-image:latest", stream=True, decode=True, platform="linux/amd64"
+        )
+
+    def test_pull_with_progress_uses_native_platform_on_amd64(self, mock_docker_client):
+        """Test pull laisse Docker choisir sur un hôte amd64."""
+        mock_docker_client.api.pull.return_value = []
+
+        with patch('nihil.manager.manager.docker.from_env', return_value=mock_docker_client):
+            with patch('nihil.manager.manager.ensure_filesystem'):
+                with patch('nihil.utils.platform_info.get_image_platform', return_value=None):
+                    with patch.object(NihilManager, 'snapshot_local_image_as_version'):
+                        manager = NihilManager()
+                        manager._pull_with_progress("test-image:latest")
+
+        mock_docker_client.api.pull.assert_called_once_with(
+            "test-image:latest", stream=True, decode=True
+        )
+
     def test_ensure_image_exists_pull_fails(self, mock_docker_client):
         """Test ensure_image_exists quand le pull échoue (manager utilise _pull_with_progress)."""
         mock_docker_client.images.get.side_effect = docker.errors.ImageNotFound("Not found")
@@ -100,6 +130,34 @@ class TestNihilManager:
                 assert config["privileged"] is False
                 assert config["hostname"] == "test-container"
     
+    def test_create_container_sets_platform_on_arm(self, mock_docker_client):
+        """Test création de container force linux/amd64 sur un hôte ARM."""
+        mock_container = MagicMock()
+        mock_docker_client.containers.create.return_value = mock_container
+        mock_docker_client.images.get.return_value = MagicMock()
+
+        with patch('nihil.manager.manager.docker.from_env', return_value=mock_docker_client):
+            with patch('nihil.manager.manager.ensure_filesystem'):
+                with patch('nihil.utils.platform_info.get_image_platform', return_value='linux/amd64'):
+                    manager = NihilManager()
+                    manager.create_container("test-container")
+
+                    assert mock_docker_client.containers.create.call_args.kwargs["platform"] == "linux/amd64"
+
+    def test_create_container_uses_native_platform_on_amd64(self, mock_docker_client):
+        """Test création de container laisse Docker choisir sur un hôte amd64."""
+        mock_container = MagicMock()
+        mock_docker_client.containers.create.return_value = mock_container
+        mock_docker_client.images.get.return_value = MagicMock()
+
+        with patch('nihil.manager.manager.docker.from_env', return_value=mock_docker_client):
+            with patch('nihil.manager.manager.ensure_filesystem'):
+                with patch('nihil.utils.platform_info.get_image_platform', return_value=None):
+                    manager = NihilManager()
+                    manager.create_container("test-container")
+
+                    assert "platform" not in mock_docker_client.containers.create.call_args.kwargs
+
     def test_create_container_with_privileged(self, mock_docker_client):
         """Test création de container avec --privileged"""
         mock_container = MagicMock()
