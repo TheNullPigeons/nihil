@@ -65,6 +65,15 @@ class ImageSourceManager:
             "--jq", ".defaultBranchRef.name",
         ]) or "main"
 
+    def _enable_actions(self, repo: str) -> None:
+        """Enable GitHub Actions for the fork so workflow dispatches work."""
+        self._run([
+            "gh", "api", "--method", "PUT",
+            f"repos/{repo}/actions/permissions",
+            "-F", "enabled=true",
+            "-f", "allowed_actions=all",
+        ])
+
     def _ensure_git_remote(self, path: Path, name: str, url: str) -> None:
         remotes = self._run(["git", "remote"], cwd=path).splitlines()
         if name in remotes:
@@ -91,6 +100,7 @@ class ImageSourceManager:
             self._run(["gh", "repo", "view", fork_repo, "--json", "name"])
         except ImageSourceError:
             self._run(["gh", "repo", "fork", self.upstream_repo, "--clone=false"])
+        self._enable_actions(fork_repo)
 
         branch = f"nihil/{variant}-custom"
         path = self.home / login / repo_name
@@ -147,15 +157,19 @@ class ImageSourceManager:
         )
         return path
 
-    def trigger_build(self, *, wait: bool = False) -> None:
+    def trigger_build(self, *, variant: str = "all", wait: bool = False) -> None:
         """Trigger the Docker workflow on the active personal branch."""
+        if variant not in {"all", "full", "ad", "web", "blueteam"}:
+            raise ImageSourceError("Unknown image variant. Choose all, full, ad, web, or blueteam.")
         repo = self.config.personal_image_repo
         branch = self.config.personal_image_branch
         if not repo or not branch:
             raise ImageSourceError("No personal fork is configured.")
+        self._enable_actions(repo)
         self._run([
             "gh", "workflow", "run", "docker-build.yml",
             "--repo", repo, "--ref", branch,
+            "-f", f"variant={variant}",
         ])
         if wait:
             run_id = self._run([

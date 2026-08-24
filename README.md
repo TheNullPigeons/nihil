@@ -41,10 +41,12 @@ nihil image switch upstream
 nihil image status
 ```
 
-After pushing, trigger the fork's build workflow and install the image published
-in its GHCR namespace:
+After pushing, trigger the fork's build workflow for a specific variant and
+install the image published in its GHCR namespace:
 
 ```bash
-nihil image build --wait
+nihil image build full --wait
 nihil install web
 ```
+
+Use `nihil image build` to build all variants.
