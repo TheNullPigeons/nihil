@@ -141,6 +141,10 @@ Examples:
         "--git-protocol", choices=["ssh", "https"], default="ssh",
         help="Git remote protocol (default: ssh; use https for HTTPS remotes)",
     )
+    customize_parser.add_argument(
+        "--git-del", action="store_true",
+        help="Delete the existing local image source clone before cloning it again",
+    )
     switch_parser = image_subparsers.add_parser("switch", help="Switch the active image source")
     switch_parser.add_argument("source", choices=["upstream", "personal"])
     image_subparsers.add_parser("status", help="Show configured upstream and personal image sources")

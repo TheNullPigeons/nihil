@@ -15,9 +15,13 @@ def test_image_commands_are_available():
     assert customize.no_push is True
     assert customize.repo is None
     assert customize.git_protocol == "ssh"
+    assert customize.git_del is False
 
     https = parser.parse_args(["image", "customize", "web", "--git-protocol", "https"])
     assert https.git_protocol == "https"
+
+    delete = parser.parse_args(["image", "customize", "web", "--git-del"])
+    assert delete.git_del is True
 
     switch = parser.parse_args(["image", "switch", "personal"])
     assert switch.image_action == "switch"
