@@ -45,6 +45,15 @@ _DEFAULT_CONFIG: dict = {
     "build": {
         "images_path": None,  # path to nihil-images source directory
     },
+    "image_sources": {
+        "home": str(NIHIL_HOME / "image-sources"),
+        "active": "upstream",
+        "upstream_repo": "TheNullPigeons/nihil-images",
+        "upstream_path": str(NIHIL_HOME / "image-sources" / "upstream" / "nihil-images"),
+        "personal_path": None,
+        "personal_repo": None,
+        "personal_branch": None,
+    },
 }
 
 _CONFIG_COMMENT = """\
@@ -64,6 +73,9 @@ _CONFIG_COMMENT = """\
 # display.x11_by_default      : enable X11 forwarding by default
 # updates.auto_check          : check for image updates on start
 # build.images_path           : path to nihil-images source directory (for nihil build)
+# image_sources.active         : upstream | personal
+# image_sources.personal_repo  : GitHub fork used for customized images
+# image_sources.personal_branch: branch used for customized images
 
 """
 
@@ -209,6 +221,59 @@ class NihilConfig:
         if raw:
             return Path(raw).expanduser().resolve()
         return None
+
+    # ------------------------------------------------------------------
+    # Properties: image_sources
+    # ------------------------------------------------------------------
+
+    @property
+    def image_sources_home(self) -> Path:
+        raw = self._get("image_sources", "home")
+        return Path(raw).expanduser().resolve() if raw else NIHIL_HOME / "image-sources"
+
+    @property
+    def image_source_active(self) -> str:
+        return self._get("image_sources", "active") or "upstream"
+
+    @property
+    def image_sources_upstream_path(self) -> Path:
+        raw = self._get("image_sources", "upstream_path")
+        return Path(raw).expanduser().resolve() if raw else self.image_sources_home / "upstream" / "nihil-images"
+
+    @property
+    def personal_image_path(self) -> Optional[Path]:
+        raw = self._get("image_sources", "personal_path")
+        return Path(raw).expanduser().resolve() if raw else None
+
+    @property
+    def personal_image_repo(self) -> Optional[str]:
+        return self._get("image_sources", "personal_repo")
+
+    @property
+    def personal_image_branch(self) -> Optional[str]:
+        return self._get("image_sources", "personal_branch")
+
+    def set_image_source(
+        self,
+        *,
+        active: str,
+        path: Path,
+        personal_repo: Optional[str],
+        personal_branch: Optional[str],
+        upstream_path: Path,
+        upstream_repo: Optional[str] = None,
+    ) -> None:
+        self._data.setdefault("image_sources", {})
+        self._data["image_sources"].update({
+            "active": active,
+            "upstream_repo": upstream_repo or self._data["image_sources"].get("upstream_repo"),
+            "upstream_path": str(upstream_path),
+            "personal_path": str(path) if active == "personal" else self._data["image_sources"].get("personal_path"),
+            "personal_repo": personal_repo,
+            "personal_branch": personal_branch,
+        })
+        self._data.setdefault("build", {})["images_path"] = str(path)
+        self.save()
 
     # ------------------------------------------------------------------
     # Helpers internes
