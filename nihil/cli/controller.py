@@ -1348,8 +1348,8 @@ class NihilController:
         return 1
 
     def _customize_image(self, args, source_manager) -> int:
-        from rich.prompt import Confirm, Prompt
-        from rich.table import Table
+        from contextlib import nullcontext
+        from rich.prompt import Confirm
         from nihil.features.image_sources import ImageSourceError
         import json
         import subprocess
@@ -1361,8 +1361,15 @@ class NihilController:
             print("Aborted.")
             return 0
 
+        console = getattr(self.formatter, "console", None)
+        loading = (
+            console.status("[cyan]Preparing the GitHub fork and image source...[/]", spinner="dots")
+            if console
+            else nullcontext()
+        )
         try:
-            path, fork_repo, branch = source_manager.ensure_personal_fork(variant=args.variant)
+            with loading:
+                path, fork_repo, branch = source_manager.ensure_personal_fork(variant=args.variant)
         except ImageSourceError as exc:
             print(self.formatter.error(str(exc)), file=sys.stderr)
             return 1
@@ -1401,37 +1408,11 @@ class NihilController:
         mandatory_names = {tool["name"].lower() for tool in tools if tool["mandatory"]}
         disabled = {name for name in disabled if str(name).lower() not in mandatory_names}
 
-        while True:
-            table = Table(title=f"Tools for {fork_repo}:{branch}")
-            table.add_column("#", justify="right")
-            table.add_column("STATE")
-            table.add_column("TOOL")
-            table.add_column("CATEGORY")
-            table.add_column("COMMAND")
-            for index, tool in enumerate(tools, start=1):
-                enabled = tool["mandatory"] or tool["name"] not in disabled
-                state = "ON (required)" if tool["mandatory"] else ("ON" if enabled else "OFF")
-                table.add_row(str(index), state, tool["name"], tool["category"], tool["cmd"])
-            self.formatter.console.print(table) if hasattr(self.formatter, "console") else print(table)
-            raw = Prompt.ask("Toggle tool numbers, or 'done'", default="done").strip().lower()
-            if raw in ("done", "d", ""):
-                break
-            try:
-                indexes = [int(value.strip()) for value in raw.split(",")]
-            except ValueError:
-                print(self.formatter.warning("Use comma-separated numbers, for example: 2,5,9"))
-                continue
-            for index in indexes:
-                if 1 <= index <= len(tools):
-                    tool = tools[index - 1]
-                    if tool["mandatory"]:
-                        print(self.formatter.info(f"{tool['name']} is always installed."))
-                        continue
-                    name = tool["name"]
-                    if name in disabled:
-                        disabled.remove(name)
-                    else:
-                        disabled.add(name)
+        selected = self._select_tools_tui(tools, disabled, title=f"{fork_repo}:{branch}")
+        if selected is None:
+            print("Tool selection cancelled.")
+            return 0
+        disabled = selected
 
         selection_path.write_text(
             json.dumps({"version": 1, "disabled_tools": sorted(disabled)}, indent=2) + "\n",
@@ -1459,6 +1440,18 @@ class NihilController:
             return exc.returncode or 1
         print(self.formatter.success(f"Customization pushed to {fork_repo}:{branch}"))
         return 0
+
+    def _select_tools_tui(self, tools: list[dict], disabled: set[str], *, title: str) -> set[str] | None:
+        """Run the Textual selector and return the disabled tools."""
+        try:
+            from nihil.features.tool_selector import ToolSelectorApp
+        except ImportError as exc:
+            print(self.formatter.error(f"Textual is required for the tool selector: {exc}"), file=sys.stderr)
+            return None
+
+        app = ToolSelectorApp(tools, disabled, title)
+        app.run()
+        return app.return_value
 
     def _cmd_resources(self, args) -> int:
         from nihil.config import NIHIL_RESOURCES_REPO
