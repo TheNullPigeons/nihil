@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import subprocess
+import shutil
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -73,7 +74,13 @@ class ImageSourceManager:
         else:
             self._run(["git", "remote", "add", name, url], cwd=path)
 
-    def ensure_personal_fork(self, *, variant: str, git_protocol: str = "ssh") -> tuple[Path, str, str]:
+    def ensure_personal_fork(
+        self,
+        *,
+        variant: str,
+        git_protocol: str = "ssh",
+        delete_existing: bool = False,
+    ) -> tuple[Path, str, str]:
         """Create or reuse the fork and prepare a customization branch."""
         if git_protocol not in {"ssh", "https"}:
             raise ImageSourceError("Git protocol must be 'ssh' or 'https'.")
@@ -94,6 +101,9 @@ class ImageSourceManager:
         else:
             fork_url = f"https://github.com/{fork_repo}.git"
             upstream_url = f"https://github.com/{self.upstream_repo}.git"
+
+        if delete_existing and path.exists():
+            shutil.rmtree(path)
 
         if not (path / ".git").is_dir():
             self._run(["git", "clone", fork_url, str(path)])

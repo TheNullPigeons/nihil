@@ -1372,6 +1372,7 @@ class NihilController:
                 path, fork_repo, branch = source_manager.ensure_personal_fork(
                     variant=args.variant,
                     git_protocol=args.git_protocol,
+                    delete_existing=args.git_del,
                 )
         except ImageSourceError as exc:
             print(self.formatter.error(str(exc)), file=sys.stderr)
