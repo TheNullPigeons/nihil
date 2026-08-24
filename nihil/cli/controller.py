@@ -1412,38 +1412,41 @@ class NihilController:
         mandatory_names = {tool["name"].lower() for tool in tools if tool["mandatory"]}
         disabled = {name for name in disabled if str(name).lower() not in mandatory_names}
 
-        selected = self._select_tools_tui(tools, disabled, title=f"{fork_repo}:{branch}")
-        if selected is None:
-            print("Tool selection cancelled.")
-            return 0
-        disabled = selected
+        while True:
+            selected = self._select_tools_tui(tools, disabled, title=f"{fork_repo}:{branch}")
+            if selected is None:
+                print("Tool selection cancelled.")
+                return 0
+            disabled = selected
 
-        selection_path.write_text(
-            json.dumps({"version": 1, "disabled_tools": sorted(disabled)}, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        print(self.formatter.success(f"Saved tool selection: {len(disabled)} disabled"))
-
-        if args.no_push:
-            print(self.formatter.info(f"Prepared branch {branch} locally at {path}."))
-            return 0
-
-        if not Confirm.ask(f"Commit and push {branch} to {fork_repo}?", default=True):
-            print(self.formatter.info(f"Changes remain local on {branch}: {path}"))
-            return 0
-        try:
-            subprocess.run(["git", "add", "build/config/tool-selection.json"], cwd=path, check=True)
-            subprocess.run(
-                ["git", "commit", "-m", f"Customize {args.variant} image tools"],
-                cwd=path,
-                check=True,
+            selection_path.write_text(
+                json.dumps({"version": 1, "disabled_tools": sorted(disabled)}, indent=2) + "\n",
+                encoding="utf-8",
             )
-            subprocess.run(["git", "push", "--set-upstream", "origin", branch], cwd=path, check=True)
-        except subprocess.CalledProcessError as exc:
-            print(self.formatter.error(f"Git operation failed (exit {exc.returncode})."), file=sys.stderr)
-            return exc.returncode or 1
-        print(self.formatter.success(f"Customization pushed to {fork_repo}:{branch}"))
-        return 0
+            print(self.formatter.success(f"Saved tool selection: {len(disabled)} disabled"))
+
+            if args.no_push:
+                print(self.formatter.info(f"Prepared branch {branch} locally at {path}."))
+                return 0
+
+            if Confirm.ask(f"Commit and push {branch} to {fork_repo}?", default=True):
+                try:
+                    subprocess.run(["git", "add", "build/config/tool-selection.json"], cwd=path, check=True)
+                    subprocess.run(
+                        ["git", "commit", "-m", f"Customize {args.variant} image tools"],
+                        cwd=path,
+                        check=True,
+                    )
+                    subprocess.run(["git", "push", "--set-upstream", "origin", branch], cwd=path, check=True)
+                except subprocess.CalledProcessError as exc:
+                    print(self.formatter.error(f"Git operation failed (exit {exc.returncode})."), file=sys.stderr)
+                    return exc.returncode or 1
+                print(self.formatter.success(f"Customization pushed to {fork_repo}:{branch}"))
+                return 0
+
+            print(self.formatter.info(f"Changes remain local on {branch}: {path}"))
+            if not Confirm.ask("Relaunch the tool selector?", default=True):
+                return 0
 
     def _select_tools_tui(self, tools: list[dict], disabled: set[str], *, title: str) -> set[str] | None:
         """Run the Textual selector and return the disabled tools."""
