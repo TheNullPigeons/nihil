@@ -106,7 +106,7 @@ def test_trigger_build_dispatches_and_can_wait(tmp_path):
     manager.trigger_build(wait=True)
     assert [
         "gh", "workflow", "run", "docker-build.yml",
-        "--repo", "alice/nihil-images", "--ref", "nihil/web-custom",
+        "--repo", "alice/nihil-images", "--ref", "nihil/web-custom", "-f", "variant=all",
     ] in calls
     assert ["gh", "run", "watch", "12345", "--repo", "alice/nihil-images", "--exit-status"] in calls
 

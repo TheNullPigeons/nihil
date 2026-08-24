@@ -152,8 +152,8 @@ Examples:
         "build", help="Trigger the Docker image workflow on the active personal branch"
     )
     build_image_parser.add_argument(
-        "variant", choices=["full", "ad", "web", "blueteam"], nargs="?", default=None,
-        help="Variant to display after dispatch (the workflow builds all variants)",
+        "variant", choices=["all", "full", "ad", "web", "blueteam"], nargs="?", default=None,
+        help="Image variant to build (default: all)",
     )
     build_image_parser.add_argument(
         "--wait", action="store_true", help="Wait until the GitHub Actions build finishes"

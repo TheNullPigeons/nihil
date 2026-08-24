@@ -1335,7 +1335,7 @@ class NihilController:
             if action == "customize":
                 return self._customize_image(args, manager)
             if action == "build":
-                manager.trigger_build(wait=args.wait)
+                manager.trigger_build(variant=args.variant or "all", wait=args.wait)
                 print(self.formatter.success(
                     f"Docker build workflow dispatched for {manager.config.personal_image_repo}:"
                     f"{manager.config.personal_image_branch}"
