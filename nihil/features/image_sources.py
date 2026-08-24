@@ -73,8 +73,10 @@ class ImageSourceManager:
         else:
             self._run(["git", "remote", "add", name, url], cwd=path)
 
-    def ensure_personal_fork(self, *, variant: str) -> tuple[Path, str, str]:
+    def ensure_personal_fork(self, *, variant: str, git_protocol: str = "ssh") -> tuple[Path, str, str]:
         """Create or reuse the fork and prepare a customization branch."""
+        if git_protocol not in {"ssh", "https"}:
+            raise ImageSourceError("Git protocol must be 'ssh' or 'https'.")
         login = self._gh_user()
         repo_name = self.upstream_repo.rsplit("/", 1)[1]
         fork_repo = f"{login}/{repo_name}"
@@ -86,8 +88,12 @@ class ImageSourceManager:
         branch = f"nihil/{variant}-custom"
         path = self.home / login / repo_name
         path.parent.mkdir(parents=True, exist_ok=True)
-        fork_url = f"https://github.com/{fork_repo}.git"
-        upstream_url = f"https://github.com/{self.upstream_repo}.git"
+        if git_protocol == "ssh":
+            fork_url = f"git@github.com:{fork_repo}.git"
+            upstream_url = f"git@github.com:{self.upstream_repo}.git"
+        else:
+            fork_url = f"https://github.com/{fork_repo}.git"
+            upstream_url = f"https://github.com/{self.upstream_repo}.git"
 
         if not (path / ".git").is_dir():
             self._run(["git", "clone", fork_url, str(path)])

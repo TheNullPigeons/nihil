@@ -137,6 +137,10 @@ Examples:
         "--repo", default=None, metavar="REPO",
         help="GitHub repository (owner/repo or URL; default: TheNullPigeons/nihil-images)",
     )
+    customize_parser.add_argument(
+        "--git-protocol", choices=["ssh", "https"], default="ssh",
+        help="Git remote protocol (default: ssh; use https for HTTPS remotes)",
+    )
     switch_parser = image_subparsers.add_parser("switch", help="Switch the active image source")
     switch_parser.add_argument("source", choices=["upstream", "personal"])
     image_subparsers.add_parser("status", help="Show configured upstream and personal image sources")
