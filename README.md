@@ -29,6 +29,9 @@ To use a group repository, add `--repo owner/repo` or its full GitHub URL.
 Git remotes use SSH by default. Use `--git-protocol https` when HTTPS remotes
 are preferred.
 
+Use `--git-del` to remove and re-clone the existing local source directory.
+This does not delete the remote GitHub repository.
+
 Changes are stored on a `nihil/<variant>-custom` branch in the fork. With
 `--no-push`, the branch is only prepared locally. Switch the active source with:
 
