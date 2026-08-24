@@ -4,6 +4,7 @@
 
 import os
 import secrets
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -54,8 +55,11 @@ class NihilController:
             return self._cmd_config(parsed_args)
         if parsed_args.command == "resources":
             return self._cmd_resources(parsed_args)
+        if parsed_args.command == "image":
+            return self._cmd_image(parsed_args)
         try:
             self.manager = NihilManager()
+            self._configure_image_registry()
         except NihilError as e:
             print(self.formatter.error(str(e)), file=sys.stderr)
             return e.exit_code
@@ -86,6 +90,33 @@ class NihilController:
         elif parsed_args.command == "completion":
             return self._cmd_completion(parsed_args)
         return 0
+
+    def _configure_image_registry(self) -> None:
+        """Point short image references to the currently active fork."""
+        if self.config.image_source_active != "personal" or not self.config.personal_image_repo:
+            return
+        owner = self.config.personal_image_repo.split("/", 1)[0].lower()
+        self.manager.AVAILABLE_IMAGES = {
+            variant: f"ghcr.io/{owner}/{variant}:latest"
+            for variant in ("full", "ad", "web", "blueteam")
+        }
+        self.manager.DEFAULT_IMAGE = self.manager.AVAILABLE_IMAGES["full"]
+
+    def _login_personal_registry(self) -> None:
+        """Use the GitHub CLI token for private GHCR packages in the fork."""
+        if self.config.image_source_active != "personal" or not self.config.personal_image_repo:
+            return
+        owner = self.config.personal_image_repo.split("/", 1)[0]
+        try:
+            token = subprocess.run(
+                ["gh", "auth", "token"], check=True, text=True,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            ).stdout.strip()
+            if token:
+                self.manager.client.login(username=owner, password=token, registry="ghcr.io")
+        except (FileNotFoundError, subprocess.CalledProcessError, AttributeError):
+            # Public images remain downloadable without authentication.
+            pass
 
     def _cmd_start(self, args) -> int:
         _NOT_CHECKED = object()
@@ -843,6 +874,7 @@ class NihilController:
             return 1
         print(self.formatter.info(f"Pulling image '{image_tag}'..."))
         try:
+            self._login_personal_registry()
             self.manager._pull_with_progress(image_tag)
             print(self.formatter.success(f"Image '{image_tag}' installed/updated successfully."))
             return 0
@@ -1271,6 +1303,162 @@ class NihilController:
     # ------------------------------------------------------------------
     # Catalogue partagé : nihil-resources
     # ------------------------------------------------------------------
+
+    def _cmd_image(self, args) -> int:
+        from nihil.features.image_sources import ImageSourceError, ImageSourceManager
+
+        manager = ImageSourceManager(
+            self.config, self.formatter, upstream_repo=getattr(args, "repo", None)
+        )
+        action = getattr(args, "image_action", None)
+        if action is None:
+            self.parser.parse_args(["image", "--help"])
+            return 0
+
+        if action == "status":
+            print(self.formatter.section_header("NIHIL IMAGE SOURCES"))
+            print(f"Active source:     {self.config.image_source_active}")
+            print(f"Upstream repo:     {manager.upstream_repo}")
+            print(f"Upstream path:     {self.config.image_sources_upstream_path}")
+            print(f"Personal path:     {self.config.personal_image_path or '-'}")
+            print(f"Personal repo:     {self.config.personal_image_repo or '-'}")
+            print(f"Personal branch:   {self.config.personal_image_branch or '-'}")
+            return 0
+
+        try:
+            if action == "switch":
+                path = manager.switch(args.source)
+                print(self.formatter.success(f"Active image source: {args.source}"))
+                print(self.formatter.info(f"Source path: {path}"))
+                return 0
+
+            if action == "customize":
+                return self._customize_image(args, manager)
+            if action == "build":
+                manager.trigger_build(wait=args.wait)
+                print(self.formatter.success(
+                    f"Docker build workflow dispatched for {manager.config.personal_image_repo}:"
+                    f"{manager.config.personal_image_branch}"
+                ))
+                print(self.formatter.info("Use 'nihil install <variant>' when the workflow has finished."))
+                return 0
+        except ImageSourceError as exc:
+            print(self.formatter.error(str(exc)), file=sys.stderr)
+            return 1
+        return 1
+
+    def _customize_image(self, args, source_manager) -> int:
+        from rich.prompt import Confirm, Prompt
+        from rich.table import Table
+        from nihil.features.image_sources import ImageSourceError
+        import json
+        import subprocess
+
+        if not Confirm.ask(
+            "Create or use your GitHub fork of nihil-images?",
+            default=True,
+        ):
+            print("Aborted.")
+            return 0
+
+        try:
+            path, fork_repo, branch = source_manager.ensure_personal_fork(variant=args.variant)
+        except ImageSourceError as exc:
+            print(self.formatter.error(str(exc)), file=sys.stderr)
+            return 1
+
+        manifest_path = path / "build" / "config" / "tools.json"
+        if not manifest_path.is_file():
+            print(self.formatter.error(f"Tools manifest not found: {manifest_path}"), file=sys.stderr)
+            return 1
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            print(self.formatter.error(f"Could not read tools manifest: {exc}"), file=sys.stderr)
+            return 1
+
+        selection_path = path / "build" / "config" / "tool-selection.json"
+        disabled: set[str] = set()
+        if selection_path.is_file():
+            try:
+                disabled = {
+                    name for name in json.loads(selection_path.read_text(encoding="utf-8")).get("disabled_tools", [])
+                    if str(name).lower() != "nihil-history"
+                }
+            except (OSError, json.JSONDecodeError):
+                disabled = set()
+
+        tools = []
+        for category, entries in manifest.items():
+            for entry in entries:
+                tools.append({
+                    "name": entry["name"],
+                    "cmd": entry.get("cmd") or "-",
+                    "category": category,
+                    "mandatory": category == "core_tools",
+                })
+        tools.sort(key=lambda item: (item["category"], item["name"].lower()))
+        mandatory_names = {tool["name"].lower() for tool in tools if tool["mandatory"]}
+        disabled = {name for name in disabled if str(name).lower() not in mandatory_names}
+
+        while True:
+            table = Table(title=f"Tools for {fork_repo}:{branch}")
+            table.add_column("#", justify="right")
+            table.add_column("STATE")
+            table.add_column("TOOL")
+            table.add_column("CATEGORY")
+            table.add_column("COMMAND")
+            for index, tool in enumerate(tools, start=1):
+                enabled = tool["mandatory"] or tool["name"] not in disabled
+                state = "ON (required)" if tool["mandatory"] else ("ON" if enabled else "OFF")
+                table.add_row(str(index), state, tool["name"], tool["category"], tool["cmd"])
+            self.formatter.console.print(table) if hasattr(self.formatter, "console") else print(table)
+            raw = Prompt.ask("Toggle tool numbers, or 'done'", default="done").strip().lower()
+            if raw in ("done", "d", ""):
+                break
+            try:
+                indexes = [int(value.strip()) for value in raw.split(",")]
+            except ValueError:
+                print(self.formatter.warning("Use comma-separated numbers, for example: 2,5,9"))
+                continue
+            for index in indexes:
+                if 1 <= index <= len(tools):
+                    tool = tools[index - 1]
+                    if tool["mandatory"]:
+                        print(self.formatter.info(f"{tool['name']} is always installed."))
+                        continue
+                    name = tool["name"]
+                    if name in disabled:
+                        disabled.remove(name)
+                    else:
+                        disabled.add(name)
+
+        selection_path.write_text(
+            json.dumps({"version": 1, "disabled_tools": sorted(disabled)}, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        print(self.formatter.success(f"Saved tool selection: {len(disabled)} disabled"))
+
+        if args.no_push:
+            print(self.formatter.info(f"Prepared branch {branch} locally at {path}."))
+            return 0
+
+        if not Confirm.ask(f"Commit and push {branch} to {fork_repo}?", default=True):
+            print(self.formatter.info(f"Changes remain local on {branch}: {path}"))
+            return 0
+        try:
+            subprocess.run(["git", "add", "build/config/tool-selection.json"], cwd=path, check=True)
+            subprocess.run(
+                ["git", "commit", "-m", f"Customize {args.variant} image tools"],
+                cwd=path,
+                check=True,
+            )
+            subprocess.run(["git", "push", "--set-upstream", "origin", branch], cwd=path, check=True)
+        except subprocess.CalledProcessError as exc:
+            print(self.formatter.error(f"Git operation failed (exit {exc.returncode})."), file=sys.stderr)
+            return exc.returncode or 1
+        print(self.formatter.success(f"Customization pushed to {fork_repo}:{branch}"))
+        return 0
 
     def _cmd_resources(self, args) -> int:
         from nihil.config import NIHIL_RESOURCES_REPO
