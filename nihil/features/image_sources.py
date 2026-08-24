@@ -75,7 +75,6 @@ class ImageSourceManager:
 
     def ensure_personal_fork(self, *, variant: str) -> tuple[Path, str, str]:
         """Create or reuse the fork and prepare a customization branch."""
-        self._run(["gh", "auth", "status"])
         login = self._gh_user()
         repo_name = self.upstream_repo.rsplit("/", 1)[1]
         fork_repo = f"{login}/{repo_name}"

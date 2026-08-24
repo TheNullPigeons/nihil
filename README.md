@@ -19,6 +19,11 @@ personal fork of `nihil-images`, and opens the interactive tool selector:
 nihil image customize web
 ```
 
+In the selector, use the arrow keys (or `j`/`k`) to move. Press `/` to search
+by tool, category, or command. Press `v` to enter visual mode, move with
+`j`/`k` to select a range, and press `Space` to toggle all selected tools.
+Press `Enter` to save, and `q` or `Esc` to cancel.
+
 To use a group repository, add `--repo owner/repo` or its full GitHub URL.
 
 Changes are stored on a `nihil/<variant>-custom` branch in the fork. With
