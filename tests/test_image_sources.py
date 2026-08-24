@@ -14,6 +14,10 @@ def test_image_commands_are_available():
     assert customize.variant == "web"
     assert customize.no_push is True
     assert customize.repo is None
+    assert customize.git_protocol == "ssh"
+
+    https = parser.parse_args(["image", "customize", "web", "--git-protocol", "https"])
+    assert https.git_protocol == "https"
 
     switch = parser.parse_args(["image", "switch", "personal"])
     assert switch.image_action == "switch"
