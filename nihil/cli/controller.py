@@ -1392,10 +1392,19 @@ class NihilController:
         disabled: set[str] = set()
         if selection_path.is_file():
             try:
-                disabled = {
-                    name for name in json.loads(selection_path.read_text(encoding="utf-8")).get("disabled_tools", [])
-                    if str(name).lower() != "nihil-history"
-                }
+                selection = json.loads(selection_path.read_text(encoding="utf-8"))
+                if "enabled_tools" in selection:
+                    enabled = {str(name) for name in selection.get("enabled_tools", [])}
+                    selected_names = {name.lower() for name in enabled}
+                    disabled = {
+                        tool["name"] for tool in tools
+                        if not tool["mandatory"] and tool["name"].lower() not in selected_names
+                    }
+                else:
+                    disabled = {
+                        name for name in selection.get("disabled_tools", [])
+                        if str(name).lower() != "nihil-history"
+                    }
             except (OSError, json.JSONDecodeError):
                 disabled = set()
 
@@ -1419,11 +1428,15 @@ class NihilController:
                 return 0
             disabled = selected
 
+            enabled = sorted(
+                tool["name"] for tool in tools
+                if tool["mandatory"] or tool["name"] not in disabled
+            )
             selection_path.write_text(
-                json.dumps({"version": 1, "disabled_tools": sorted(disabled)}, indent=2) + "\n",
+                json.dumps({"version": 2, "enabled_tools": enabled}, indent=2) + "\n",
                 encoding="utf-8",
             )
-            print(self.formatter.success(f"Saved tool selection: {len(disabled)} disabled"))
+            print(self.formatter.success(f"Saved tool selection: {len(enabled)} enabled"))
 
             if args.no_push:
                 print(self.formatter.info(f"Prepared branch {branch} locally at {path}."))
