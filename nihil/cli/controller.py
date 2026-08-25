@@ -38,7 +38,8 @@ class NihilController:
         parsed_args = self.parser.parse_args(args)
         should_show_banner = (
             parsed_args.command is not None and
-            parsed_args.command not in ["version", "completion", "config"]
+            parsed_args.command not in ["version", "completion", "config"] and
+            not (parsed_args.command == "start" and not getattr(parsed_args, "verbose", False))
         )
         if should_show_banner:
             print_compact_banner()
@@ -130,6 +131,12 @@ class NihilController:
             return _update_cache[0]
 
         container_name = args.name
+        verbose = getattr(args, "verbose", False)
+
+        def verbose_info(message: str) -> None:
+            if verbose:
+                print(self.formatter.info(message))
+
         # Appliquer les defaults de config pour les options non spécifiées par l'utilisateur
         if args.network is None:
             args.network = self.config.default_network
@@ -167,23 +174,25 @@ class NihilController:
             args.log = True
         if args.workspace is None and not args.workspace_here and self.config.default_workspace:
             args.workspace = str(self.config.default_workspace)
-        print(self.formatter.info(f"Looking for container '{container_name}'..."))
+        verbose_info(f"Looking for container '{container_name}'...")
         container = self.manager.get_container(container_name)
         container_existed = container is not None
         if container:
-            print(self.formatter.info(f"Container '{container_name}' found."))
+            verbose_info(f"Container '{container_name}' found.")
             if container.status == "running":
-                print(self.formatter.warning(f"Container '{container_name}' is already running."))
+                if verbose:
+                    print(self.formatter.warning(f"Container '{container_name}' is already running."))
             else:
-                print(self.formatter.info(f"Starting container '{container_name}'..."))
+                verbose_info(f"Starting container '{container_name}'...")
                 self.manager.start_container(container)
-                print(self.formatter.success(f"Container '{container_name}' started successfully."))
+                if verbose:
+                    print(self.formatter.success(f"Container '{container_name}' started successfully."))
             env_list = container.attrs.get("Config", {}).get("Env") or []
             delay_info = not args.no_shell and any(e == "NIHIL_BROWSER_UI=1" for e in env_list)
-            if not delay_info:
+            if verbose and not delay_info:
                 self._print_container_info(container, args, created=False, update_available=get_update(container))
         else:
-            print(self.formatter.info(f"Container '{container_name}' doesn't exist. Creating..."))
+            verbose_info(f"Container '{container_name}' doesn't exist. Creating...")
             network_map = {"host": "host", "disabled": "none", "docker": "bridge", "nat": "bridge"}
             image_arg = args.image
             if image_arg is None:
@@ -227,7 +236,7 @@ class NihilController:
                     print("\nAborted.")
                     return 1
             image = self.manager.resolve_image_tag(image_arg) or self.manager.DEFAULT_IMAGE
-            print(self.formatter.info(f"Using image variant: {image_arg} ({image})"))
+            verbose_info(f"Using image variant: {image_arg} ({image})")
             vpn_path = getattr(args, "vpn", None)
             workspace_path = args.workspace
             if workspace_path is None and getattr(args, "workspace_here", False):
@@ -271,21 +280,22 @@ class NihilController:
                 browser_ui_port=browser_ui_port if browser_ui_enabled else None,
                 browser_ui_password=browser_ui_password if browser_ui_enabled else None,
             )
-            print(self.formatter.info(f"Container '{container_name}' created."))
-            print(self.formatter.info(f"Starting container '{container_name}'..."))
+            verbose_info(f"Container '{container_name}' created.")
+            verbose_info(f"Starting container '{container_name}'...")
             self.manager.start_container(container)
-            print(self.formatter.success(f"Container '{container_name}' created and started successfully."))
+            if verbose:
+                print(self.formatter.success(f"Container '{container_name}' created and started successfully."))
             if not getattr(args, "no_my_resources", False):
                 try:
                     output = self.manager.run_user_setup_script(container)
-                    if output is not None:
-                        print(self.formatter.info("Running load_user_setup.sh..."))
+                    if verbose and output is not None:
+                        verbose_info("Running load_user_setup.sh...")
                         if output:
                             print(output)
                         print(self.formatter.success("User setup script completed."))
                 except RuntimeError as e:
                     print(self.formatter.warning(f"User setup script failed: {e}"))
-            if not (browser_ui_enabled and not args.no_shell):
+            if verbose and not (browser_ui_enabled and not args.no_shell):
                 self._print_container_info(container, args, created=True, update_available=get_update(container))
         if not args.no_shell:
             command = "zsh"
@@ -325,18 +335,19 @@ class NihilController:
                         except ValueError:
                             pass
             if browser_ui_port:
-                print(self.formatter.info("Preparing browser UI..."))
+                verbose_info("Preparing browser UI...")
                 deadline = time.monotonic() + 180
                 while time.monotonic() < deadline:
                     if browser_ui_is_page_ready(browser_ui_port):
-                        print(self.formatter.success("Browser UI ready."))
+                        if verbose:
+                            print(self.formatter.success("Browser UI ready."))
                         break
                     time.sleep(2)
                 else:
                     print(self.formatter.warning("Browser UI may still be starting; open the link from the recap when ready."))
                 session_str = browser_ui_get_session_str(container, container_name)
                 self._print_container_info(container, args, created=not container_existed, browser_ui_session=session_str, update_available=get_update(container))
-            print(self.formatter.info(f"Connecting to container '{container_name}'..."))
+            verbose_info(f"Connecting to container '{container_name}'...")
             self.manager.exec_in_container(container, command)
         return 0
 
