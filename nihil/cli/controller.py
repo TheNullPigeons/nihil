@@ -1394,6 +1394,17 @@ class NihilController:
             print(self.formatter.error(f"Could not read tools manifest: {exc}"), file=sys.stderr)
             return 1
 
+        tools = []
+        for category, entries in manifest.items():
+            for entry in entries:
+                tools.append({
+                    "name": entry["name"],
+                    "cmd": entry.get("cmd") or "-",
+                    "category": category,
+                    "mandatory": category == "core_tools",
+                })
+        tools.sort(key=lambda item: (item["category"], item["name"].lower()))
+
         selection_path = path / "build" / "config" / "tool-selection.json"
         disabled: set[str] = set()
         if selection_path.is_file():
@@ -1414,16 +1425,6 @@ class NihilController:
             except (OSError, json.JSONDecodeError):
                 disabled = set()
 
-        tools = []
-        for category, entries in manifest.items():
-            for entry in entries:
-                tools.append({
-                    "name": entry["name"],
-                    "cmd": entry.get("cmd") or "-",
-                    "category": category,
-                    "mandatory": category == "core_tools",
-                })
-        tools.sort(key=lambda item: (item["category"], item["name"].lower()))
         mandatory_names = {tool["name"].lower() for tool in tools if tool["mandatory"]}
         disabled = {name for name in disabled if str(name).lower() not in mandatory_names}
 
