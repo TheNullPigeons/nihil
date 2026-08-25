@@ -38,7 +38,7 @@ class ToolSelectorApp(App[set[str] | None]):
         Binding("escape", "escape_mode", "Escape"),
         Binding("enter", "save", "Save", priority=True),
         Binding("space", "toggle", "Toggle"),
-        Binding("v", "visual_toggle", "Visual"),
+        Binding("v", "visual_toggle", "Visual (select mode)"),
         Binding("/", "search_open", "Search", show=False),
         Binding("j", "move_down", "↓", show=False),
         Binding("k", "move_up", "↑", show=False),
