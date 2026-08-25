@@ -23,6 +23,7 @@ Examples:
   nihil --help                         Display this help
   nihil info                           Show images and containers
   nihil start pentest --privileged     Start a privileged container
+  nihil start pentest --verbose        Show detailed startup information
   nihil exec pentest                   Connect to a container
   nihil remove test1 test2 --force     Remove multiple containers
   nihil uninstall                      Remove default image
@@ -99,6 +100,7 @@ Examples:
 
     start_parser = subparsers.add_parser("start", help="Start a container (creates it if it doesn't exist)")
     start_parser.add_argument("name", help="Container name")
+    start_parser.add_argument("--verbose", "-v", action="store_true", help="Show detailed startup steps and container information")
     start_parser.add_argument("--privileged", action="store_true", help="Privileged mode")
     start_parser.add_argument("--network", choices=["docker", "host", "disabled", "nat"], default=None, help="Network mode (default: from config, fallback: host)")
     start_parser.add_argument("--image", default=None, metavar="VARIANT", help="Image variant to use (full|ad|web|blueteam or nihil/<variant>:local). If not specified, you will be prompted to select one.")
