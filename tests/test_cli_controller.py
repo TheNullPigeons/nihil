@@ -70,3 +70,71 @@ class TestUninstallForce:
         manager.remove_container.assert_called_once_with(ad_container, force=True)
         # L'image est ensuite supprimée avec force=True.
         manager.remove_image.assert_called_once_with(image_ref, force=True)
+
+
+class TestBuildPlatform:
+    """Tests pour la plateforme passée à `docker build`."""
+
+    @staticmethod
+    def _make_controller(source):
+        from nihil.cli.controller import NihilController
+
+        controller = NihilController.__new__(NihilController)
+        controller.config = SimpleNamespace(images_path=str(source))
+        controller.formatter = MagicMock()
+        controller.formatter.info.side_effect = lambda message: message
+        controller.formatter.success.side_effect = lambda message: message
+        controller.formatter.error.side_effect = lambda message: message
+        return controller
+
+    @staticmethod
+    def _run_build(controller, variant, tag=None):
+        args = SimpleNamespace(
+            variant=variant,
+            source=None,
+            tag=tag,
+            no_cache=False,
+            log=None,
+        )
+        process = MagicMock()
+        process.stdout.read1.return_value = b""
+        process.returncode = 0
+
+        with patch("subprocess.Popen", return_value=process) as popen:
+            assert controller._cmd_build(args) == 0
+
+        return popen.call_args.args[0]
+
+    @pytest.mark.parametrize(
+        ("variant", "dockerfile"),
+        [
+            ("full", "Dockerfile"),
+            ("blueteam", "Dockerfile.blueteam"),
+            ("test", "Dockerfile.test"),
+        ],
+    )
+    def test_arm64_build_sets_amd64_platform(self, tmp_path, variant, dockerfile):
+        """Les variantes principales ciblent linux/amd64 sur ARM64."""
+        (tmp_path / dockerfile).touch()
+        controller = self._make_controller(tmp_path)
+
+        with patch("nihil.utils.get_image_platform", return_value="linux/amd64"):
+            command = self._run_build(controller, variant)
+
+        assert command[:2] == ["docker", "build"]
+        assert command[command.index("--file") + 1] == str(tmp_path / dockerfile)
+        assert command[command.index("--tag") + 1] == f"nihil/{variant}:local"
+        assert command[command.index("--platform") + 1] == "linux/amd64"
+        assert command[-1] == str(tmp_path)
+
+    def test_amd64_build_keeps_custom_tag_without_platform(self, tmp_path):
+        """Un build amd64 conserve le tag demandé sans forcer de plateforme."""
+        (tmp_path / "Dockerfile").touch()
+        controller = self._make_controller(tmp_path)
+
+        with patch("nihil.utils.get_image_platform", return_value=None):
+            command = self._run_build(controller, "full", tag="example/nihil:dev")
+
+        assert "--platform" not in command
+        assert command[command.index("--tag") + 1] == "example/nihil:dev"
+        assert command[-1] == str(tmp_path)
