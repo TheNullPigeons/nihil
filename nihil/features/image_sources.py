@@ -5,6 +5,9 @@ from __future__ import annotations
 
 import subprocess
 import shutil
+import json
+import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -171,19 +174,43 @@ class ImageSourceManager:
         if not repo or not branch:
             raise ImageSourceError("No personal fork is configured.")
         self._enable_actions(repo)
+        dispatch_started = datetime.now(timezone.utc)
         self._run([
             "gh", "workflow", "run", "docker-build.yml",
             "--repo", repo, "--ref", branch,
             "-f", f"variant={variant}",
         ])
         if wait:
-            run_id = self._run([
-                "gh", "run", "list", "--workflow", "docker-build.yml",
-                "--repo", repo, "--branch", branch, "--limit", "1",
-                "--json", "databaseId", "--jq", ".[0].databaseId",
-            ])
+            run_id = ""
+            deadline = time.monotonic() + 30
+            earliest_run = dispatch_started - timedelta(seconds=2)
+            while time.monotonic() < deadline:
+                raw_runs = self._run([
+                    "gh", "run", "list", "--workflow", "docker-build.yml",
+                    "--repo", repo, "--branch", branch, "--limit", "10",
+                    "--json", "databaseId,createdAt",
+                ])
+                try:
+                    runs = json.loads(raw_runs or "[]")
+                except json.JSONDecodeError:
+                    runs = []
+                for run in runs:
+                    try:
+                        created_at = datetime.fromisoformat(
+                            run["createdAt"].replace("Z", "+00:00")
+                        )
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                    if created_at >= earliest_run:
+                        run_id = str(run.get("databaseId", ""))
+                        break
+                if run_id:
+                    break
+                time.sleep(1)
             if not run_id:
-                raise ImageSourceError("The workflow was dispatched, but its run ID could not be found.")
+                raise ImageSourceError(
+                    "The workflow was dispatched, but its new run ID could not be found."
+                )
             self._run(["gh", "run", "watch", run_id, "--repo", repo, "--exit-status"], capture=False)
 
     def switch(self, source: str) -> Path:
