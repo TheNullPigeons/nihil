@@ -118,9 +118,24 @@ def test_personal_source_repoints_docker_image_references():
     controller.config = SimpleNamespace(
         image_source_active="personal",
         personal_image_repo="Alice/nihil-images",
+        personal_image_branch="nihil/web-custom",
     )
     controller.manager = SimpleNamespace()
     NihilController._configure_image_registry(controller)
 
-    assert controller.manager.AVAILABLE_IMAGES["web"] == "ghcr.io/alice/web:latest"
-    assert controller.manager.DEFAULT_IMAGE == "ghcr.io/alice/full:latest"
+    assert controller.manager.AVAILABLE_IMAGES["web"] == "ghcr.io/alice/web:nihil-web-custom"
+    assert controller.manager.DEFAULT_IMAGE == "ghcr.io/alice/full:nihil-web-custom"
+
+
+def test_personal_source_uses_latest_without_a_custom_branch():
+    from nihil.cli.controller import NihilController
+
+    controller = NihilController.__new__(NihilController)
+    controller.config = SimpleNamespace(
+        image_source_active="personal",
+        personal_image_repo="Alice/nihil-images",
+    )
+    controller.manager = SimpleNamespace()
+    NihilController._configure_image_registry(controller)
+
+    assert controller.manager.AVAILABLE_IMAGES["full"] == "ghcr.io/alice/full:latest"
