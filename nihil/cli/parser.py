@@ -35,7 +35,13 @@ Examples:
   nihil resources update               git pull the local nihil-resources catalog
   nihil resources sync                 Fetch tools listed in catalog/resources.toml
   nihil resources status               Show local nihil-resources status
-  nihil image customize                Create a personal nihil-images fork and select tools
+  nihil image status                  Show configured image sources
+  nihil image customize               Select tools for a personal image branch
+  nihil image customize full --git-del
+                                      Recreate the local clone and reuse its remote branch
+  nihil image build full               Trigger a build for the full image only
+  nihil image build full --wait       Trigger a full-image build and wait for completion
+  nihil image build --wait             Trigger builds for all image variants and wait
   nihil image switch upstream          Use the upstream nihil-images source
   nihil image switch personal          Use the personal fork source
 
@@ -47,7 +53,45 @@ Examples:
     info_parser = subparsers.add_parser("info", help="Display information about images and containers")
     info_parser.add_argument("--container", "-c", metavar="NAME", help="Show detailed information for a specific container")
 
-    subparsers.add_parser("images", help="List available image variants")
+    subparsers.add_parser("images", help="List available and local image variants")
+
+    image_parser = subparsers.add_parser("image", help="Manage custom nihil-images sources")
+    image_subparsers = image_parser.add_subparsers(dest="image_action", metavar="ACTION")
+    customize_parser = image_subparsers.add_parser(
+        "customize", help="Select tools for a personal nihil-images branch"
+    )
+    customize_parser.add_argument(
+        "variant", choices=["full", "ad", "web", "blueteam"], default="full", nargs="?",
+        help="Image variant whose source branch should be customized (default: full)",
+    )
+    customize_parser.add_argument(
+        "--no-push", action="store_true", help="Prepare the branch locally without committing or pushing"
+    )
+    customize_parser.add_argument(
+        "--repo", default=None, metavar="REPO",
+        help="GitHub repository (owner/repo or URL; default: TheNullPigeons/nihil-images)",
+    )
+    customize_parser.add_argument(
+        "--git-protocol", choices=["ssh", "https"], default="ssh",
+        help="Git remote protocol (default: ssh; use https for HTTPS remotes)",
+    )
+    customize_parser.add_argument(
+        "--git-del", action="store_true",
+        help="Delete the local clone before setup; reuse its remote branch when available",
+    )
+    switch_parser = image_subparsers.add_parser("switch", help="Switch the active image source")
+    switch_parser.add_argument("source", choices=["upstream", "personal"])
+    image_subparsers.add_parser("status", help="Show configured upstream and personal image sources")
+    build_image_parser = image_subparsers.add_parser(
+        "build", help="Trigger Docker builds on the active personal image branch"
+    )
+    build_image_parser.add_argument(
+        "variant", choices=["all", "full", "ad", "web", "blueteam"], nargs="?", default=None,
+        help="Image variant to build (default: all)",
+    )
+    build_image_parser.add_argument(
+        "--wait", action="store_true", help="Wait until the GitHub Actions build finishes"
+    )
 
     subparsers.add_parser("version", help="Display Nihil version")
 
@@ -120,44 +164,6 @@ Examples:
     resources_sync = resources_subparsers.add_parser("sync", help="Run the nihil-resources scripts/sync.py to fetch enabled tools")
     resources_sync.add_argument("--profile", default=None, help="Restrict sync to a profile (full|ad|web|blueteam)")
     resources_subparsers.add_parser("status", help="Show local nihil-resources status (path, branch, last commit)")
-
-    image_parser = subparsers.add_parser("image", help="Manage custom nihil-images sources")
-    image_subparsers = image_parser.add_subparsers(dest="image_action", metavar="ACTION")
-    customize_parser = image_subparsers.add_parser(
-        "customize", help="Fork nihil-images, select tools, commit and push a personal branch"
-    )
-    customize_parser.add_argument(
-        "variant", choices=["full", "ad", "web", "blueteam"], default="full", nargs="?",
-        help="Image variant whose source branch should be customized (default: full)",
-    )
-    customize_parser.add_argument(
-        "--no-push", action="store_true", help="Prepare the branch locally without committing or pushing"
-    )
-    customize_parser.add_argument(
-        "--repo", default=None, metavar="REPO",
-        help="GitHub repository (owner/repo or URL; default: TheNullPigeons/nihil-images)",
-    )
-    customize_parser.add_argument(
-        "--git-protocol", choices=["ssh", "https"], default="ssh",
-        help="Git remote protocol (default: ssh; use https for HTTPS remotes)",
-    )
-    customize_parser.add_argument(
-        "--git-del", action="store_true",
-        help="Delete the existing local image source clone before cloning it again",
-    )
-    switch_parser = image_subparsers.add_parser("switch", help="Switch the active image source")
-    switch_parser.add_argument("source", choices=["upstream", "personal"])
-    image_subparsers.add_parser("status", help="Show configured upstream and personal image sources")
-    build_image_parser = image_subparsers.add_parser(
-        "build", help="Trigger the Docker image workflow on the active personal branch"
-    )
-    build_image_parser.add_argument(
-        "variant", choices=["all", "full", "ad", "web", "blueteam"], nargs="?", default=None,
-        help="Image variant to build (default: all)",
-    )
-    build_image_parser.add_argument(
-        "--wait", action="store_true", help="Wait until the GitHub Actions build finishes"
-    )
 
     completion_parser = subparsers.add_parser("completion", help="Generate shell completion script")
     completion_parser.add_argument("shell", choices=["bash", "zsh"], help="Target shell for completion script (bash or zsh)")
