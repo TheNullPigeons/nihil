@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 from types import SimpleNamespace
 
 from nihil.cli.parser import create_parser
@@ -138,7 +139,10 @@ def test_trigger_build_dispatches_and_can_wait(tmp_path):
     def fake_run(command, *, cwd=None, capture=True):
         calls.append(command)
         if command[:3] == ["gh", "run", "list"]:
-            return "12345"
+            return json.dumps([{
+                "databaseId": 12345,
+                "createdAt": "2099-01-01T00:00:00Z",
+            }])
         return ""
 
     manager._run = fake_run
