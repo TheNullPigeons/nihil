@@ -124,8 +124,13 @@ class ImageSourceManager:
         default_branch = self._default_branch(self.upstream_repo)
         self._run(["git", "fetch", "origin"], cwd=path)
         branches = self._run(["git", "branch", "--format=%(refname:short)"], cwd=path).splitlines()
+        remote_branches = self._run(
+            ["git", "branch", "--remotes", "--format=%(refname:short)"], cwd=path
+        ).splitlines()
         if branch in branches:
             self._run(["git", "switch", branch], cwd=path)
+        elif f"origin/{branch}" in remote_branches:
+            self._run(["git", "switch", "-c", branch, "--track", f"origin/{branch}"], cwd=path)
         else:
             self._run(["git", "switch", "-c", branch, f"upstream/{default_branch}"], cwd=path)
 
