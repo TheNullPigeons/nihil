@@ -1223,6 +1223,10 @@ class NihilController:
             "--build-arg", "VERSION=local",
             "--build-arg", f"BUILD_DATE={build_date}",
         ]
+        from nihil.utils import get_image_platform
+        image_platform = get_image_platform()
+        if image_platform:
+            cmd.extend(["--platform", image_platform])
         if getattr(args, "no_cache", False):
             cmd.append("--no-cache")
         cmd.append(str(source))
