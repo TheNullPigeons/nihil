@@ -87,6 +87,45 @@ def test_existing_fork_is_reused_and_custom_branch_is_created(tmp_path):
     assert ["git", "switch", "-c", "nihil/web-custom", "upstream/main"] in calls
 
 
+def test_existing_remote_custom_branch_is_checked_out_after_local_reset(tmp_path):
+    home = tmp_path / "sources"
+    path = home / "alice" / "nihil-images"
+    config = SimpleNamespace(
+        image_sources_home=home,
+        image_sources_upstream_path=home / "upstream" / "nihil-images",
+    )
+    config.set_image_source = lambda **kwargs: None
+    manager = ImageSourceManager(config)
+    calls = []
+
+    def fake_run(command, *, cwd=None, capture=True):
+        calls.append(command)
+        if command[:3] == ["gh", "api", "user"]:
+            return "alice"
+        if command[:4] == ["gh", "repo", "view", "alice/nihil-images"]:
+            return "name"
+        if command == ["git", "remote"]:
+            return "origin\nupstream"
+        if command[:4] == ["git", "remote", "get-url", "origin"]:
+            return "git@github.com:alice/nihil-images.git"
+        if command[:4] == ["git", "remote", "get-url", "upstream"]:
+            return "git@github.com:TheNullPigeons/nihil-images.git"
+        if command[:2] == ["git", "branch"] and "--remotes" in command:
+            return "origin/main\norigin/nihil/web-custom"
+        if command[:2] == ["git", "branch"]:
+            return "main"
+        if command[:4] == ["gh", "repo", "view", "TheNullPigeons/nihil-images"]:
+            return "main"
+        return ""
+
+    manager._run = fake_run
+    manager.ensure_personal_fork(variant="web", delete_existing=True)
+
+    assert [
+        "git", "switch", "-c", "nihil/web-custom", "--track", "origin/nihil/web-custom"
+    ] in calls
+
+
 def test_trigger_build_dispatches_and_can_wait(tmp_path):
     config = SimpleNamespace(
         image_sources_home=tmp_path,
