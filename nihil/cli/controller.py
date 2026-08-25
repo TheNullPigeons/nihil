@@ -96,8 +96,10 @@ class NihilController:
         if self.config.image_source_active != "personal" or not self.config.personal_image_repo:
             return
         owner = self.config.personal_image_repo.split("/", 1)[0].lower()
+        branch = getattr(self.config, "personal_image_branch", "")
+        image_tag = branch.replace("/", "-") if branch else "latest"
         self.manager.AVAILABLE_IMAGES = {
-            variant: f"ghcr.io/{owner}/{variant}:latest"
+            variant: f"ghcr.io/{owner}/{variant}:{image_tag}"
             for variant in ("full", "ad", "web", "blueteam")
         }
         self.manager.DEFAULT_IMAGE = self.manager.AVAILABLE_IMAGES["full"]
