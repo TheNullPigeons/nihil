@@ -61,7 +61,7 @@ class TestShortImageName:
         assert short_image_name("localonly") == "localonly"
 
 
-def test_inventory_does_not_depend_on_active_source():
+def test_inventory_and_container_status_do_not_depend_on_active_source():
     from types import SimpleNamespace
     from unittest.mock import Mock
     import docker
@@ -100,6 +100,10 @@ def test_inventory_does_not_depend_on_active_source():
         assert manager.get_image_source(personal) == "personal"
         assert manager.get_image_source(snapshot) == "local"
         assert manager.get_container_source(old) == "personal"
+        assert manager.is_container_image_current(current) is True
+        assert manager.is_container_image_current(old) is False
+        assert manager.is_container_image_current(missing) is None
+        assert manager.is_container_image_current(pinned_id) is None
 
 
 def test_labeled_images_from_other_forks_are_included():
@@ -114,3 +118,37 @@ def test_labeled_images_from_other_forks_are_included():
     img.tags = []
     assert manager.get_image_source(img) == "local"
     assert manager.image_source("ghcr.io/stranger/redis:latest") == "Unknown"
+
+
+def test_image_usage_tracks_exact_ids_and_includes_stopped_containers():
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from nihil.manager import NihilManager
+
+    manager = NihilManager.__new__(NihilManager)
+    manager.client = Mock()
+    manager.client.containers.list.return_value = [
+        SimpleNamespace(name="running-lab", status="running", attrs={
+            "Image": "sha256:old", "Config": {"Image": "full:latest"}}),
+        SimpleNamespace(name="stopped-lab", status="exited", attrs={
+            "Image": "sha256:old", "Config": {"Image": "full:latest"}}),
+        SimpleNamespace(name="new-lab", status="exited", attrs={
+            "Image": "sha256:new", "Config": {"Image": "full:latest"}}),
+    ]
+    assert manager.get_image_usage() == {
+        "sha256:old": ["running-lab", "stopped-lab"], "sha256:new": ["new-lab"]}
+    manager.client.containers.list.assert_called_once_with(all=True)
+
+
+def test_image_usage_does_not_report_unused_when_inventory_fails():
+    from unittest.mock import Mock
+    import docker
+    from nihil.manager import NihilManager
+
+    manager = NihilManager.__new__(NihilManager)
+    manager.client = Mock()
+    manager.client.containers.list.side_effect = docker.errors.APIError("unavailable")
+    assert manager.get_image_usage() is None
+    manager.client.containers.list.side_effect = None
+    manager.client.containers.list.return_value = []
+    assert manager.get_image_usage() == {}

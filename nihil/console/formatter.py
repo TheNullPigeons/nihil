@@ -48,6 +48,13 @@ class NihilFormatter:
     def warning(self, message: str) -> str:
         return self._colorize(f"[!] {message}", self.YELLOW)
 
+    def image_source(self, source: str) -> str:
+        colors = {"personal": self.MAGENTA, "upstream": self.CYAN}
+        return ", ".join(
+            self._colorize(part, colors[part]) if part in colors else part
+            for part in source.split(", ")
+        )
+
     def section_header(self, title: str, icon: str = "") -> str:
         header = f"{icon} {title}" if icon else title
         return f"\n{self._colorize(header, self.BOLD)}"
