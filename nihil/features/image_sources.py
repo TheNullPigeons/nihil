@@ -137,6 +137,10 @@ class ImageSourceManager:
         else:
             self._run(["git", "switch", "-c", branch, f"upstream/{default_branch}"], cwd=path)
 
+        return path, fork_repo, branch
+
+    def activate_personal(self, path: Path, fork_repo: str, branch: str) -> None:
+        """Activate a personal source after customization completes successfully."""
         self.config.set_image_source(
             active="personal",
             path=path,
@@ -145,7 +149,6 @@ class ImageSourceManager:
             upstream_path=self.config.image_sources_upstream_path,
             upstream_repo=self.upstream_repo,
         )
-        return path, fork_repo, branch
 
     def ensure_upstream(self) -> Path:
         path = self.config.image_sources_upstream_path
