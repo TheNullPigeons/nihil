@@ -1082,7 +1082,7 @@ class NihilController:
             self._print_container_info(container, args, created=False)
             return 0
         print(self.formatter.info(f"Nihil version {__version__}\n"))
-        print(self.formatter.info(f"Active image source: {self.config.image_source_active}"))
+        print(self.formatter.info(f"Active image source: {self.formatter.image_source(self.config.image_source_active)}"))
         variant_descriptions = {
             "full": "The whole flock, every tool, every module",
             "ad": "Nest in their Active Directory",
@@ -1106,14 +1106,22 @@ class NihilController:
         print(self.formatter.section_header("INSTALLED IMAGES"))
         images = self.manager.list_images()
         if images:
+            image_usage = self.manager.get_image_usage()
             rows = []
             for img in images:
                 tags = img.tags if img.tags else []
                 short = ", ".join(self.manager.short_image_name(t) for t in tags) or img.short_id
                 version = self.manager.get_image_display_version(img) or "-"
                 size = f"{img.attrs['Size'] / (1024**3):.2f} GB"
-                rows.append([short, self.manager.get_image_source(img), version, size])
-            self.formatter.print_table(["IMAGE", "SOURCE", "VERSION", "SIZE"], rows, [40, 18, 30, 12])
+                users = image_usage.get(img.id, []) if image_usage is not None else []
+                if image_usage is None:
+                    usage = ("Unknown", self.formatter.YELLOW)
+                elif users:
+                    usage = ("Used", self.formatter.GREEN)
+                else:
+                    usage = ("Unused", self.formatter.YELLOW)
+                rows.append([short, self.formatter.image_source(self.manager.get_image_source(img)), version, size, usage])
+            self.formatter.print_table(["IMAGE", "SOURCE", "VERSION", "SIZE", "USAGE"], rows, [40, 18, 30, 12, 9])
         else:
             print("  No nihil images installed locally.")
             print("  Use 'nihil start <name> --image <variant>' to pull and use an image.")
@@ -1130,10 +1138,7 @@ class NihilController:
                     status = ("Stopped", self.formatter.RED)
                 else:
                     status = (f"{status_raw}", self.formatter.YELLOW)
-                try:
-                    image_raw = c.image.tags[0] if c.image.tags else c.attrs.get('Config', {}).get('Image', '<none>')
-                except Exception:
-                    image_raw = c.attrs.get('Config', {}).get('Image', '<deleted image>')
+                image_raw = c.attrs.get("Config", {}).get("Image", "<none>")
                 if "/" in image_raw:
                     image = image_raw.split("/")[-1]
                     if image.startswith("nihil-images"):
@@ -1155,10 +1160,10 @@ class NihilController:
                 elif is_current is False:
                     update_cell = ("Outdated", self.formatter.YELLOW)
                 else:
-                    update_cell = "-"
+                    update_cell = "Unknown"
                 is_privileged = c.attrs['HostConfig']['Privileged']
                 config = ("Privileged 💥", self.formatter.RED) if is_privileged else "Standard"
-                rows.append([name, status, image, update_cell, config, self.manager.get_container_source(c)])
+                rows.append([name, status, image, update_cell, config, self.formatter.image_source(self.manager.get_container_source(c))])
             def get_text_length(cell):
                 if isinstance(cell, tuple):
                     return len(str(cell[0]))
@@ -1325,7 +1330,7 @@ class NihilController:
 
         if action == "status":
             print(self.formatter.section_header("NIHIL IMAGE SOURCES"))
-            print(f"Active source:     {self.config.image_source_active}")
+            print(f"Active source:     {self.formatter.image_source(self.config.image_source_active)}")
             print(f"Upstream repo:     {manager.upstream_repo}")
             print(f"Upstream path:     {self.config.image_sources_upstream_path}")
             print(f"Personal path:     {self.config.personal_image_path or '-'}")
@@ -1336,7 +1341,7 @@ class NihilController:
         try:
             if action == "switch":
                 path = manager.switch(args.source)
-                print(self.formatter.success(f"Active image source: {args.source}"))
+                print(self.formatter.success(f"Active image source: {self.formatter.image_source(args.source)}"))
                 print(self.formatter.info(f"Source path: {path}"))
                 return 0
 

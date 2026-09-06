@@ -41,10 +41,18 @@ nihil image switch upstream
 nihil image status
 ```
 
-`nihil info` shows the active source and its available variants. Installed
+`nihil info` shows the active source and its available variants. The installed
 images and containers remain visible across source switches, with a `SOURCE`
-column (`upstream`, `personal`, or `local`). Saved image copies with only a
+column (`upstream`, `personal`, or `local`). The `USAGE` column shows `Used`
+when a container references the exact image ID, including stopped containers. `Unused`
+means no container references that image; `Unknown` means usage could not be
+verified. Saved image copies with only a
 `nihil/*` tag are shown as local.
+
+Container update status compares the container image with its original Docker
+reference available locally. Switching sources does not change that status.
+`Unknown` means the reference cannot be resolved; this is not a remote registry
+update check.
 
 After pushing, trigger the fork's build workflow for a specific variant and
 install the image published in its GHCR namespace:
