@@ -143,33 +143,17 @@ class NihilManager:
         return self.image_source(reference, labels)
 
     def is_container_image_current(self, container) -> Optional[bool]:
-        """True si l'image du container est l'image :latest locale du variant.
-
-        False si elle est plus ancienne (un nouveau pull a eu lieu depuis), None si
-        on ne peut pas déterminer (variant inconnu, image latest absente, etc.).
-        """
-        try:
-            container_image_id = container.image.id
-        except Exception:
-            return None
-        if not container_image_id:
+        """Compare with the original reference locally; no remote update check."""
+        reference = container.attrs.get("Config", {}).get("Image", "")
+        # An image ID has no tracked source to compare against.
+        if not reference or reference.startswith("sha256:") or (
+            len(reference) == 64 and all(c in "0123456789abcdef" for c in reference.lower())
+        ):
             return None
         try:
-            tag_used = container.image.tags[0] if container.image.tags else container.attrs.get("Config", {}).get("Image", "")
-        except Exception:
-            tag_used = ""
-        labels = self.get_image_labels(container.image)
-        variant = self._variant_for_image_tag(tag_used, labels)
-        if not variant:
-            return None
-        latest_tag = self.AVAILABLE_IMAGES.get(variant)
-        if not latest_tag:
-            return None
-        try:
-            latest_img = self.client.images.get(latest_tag)
+            return container.image.id == self.client.images.get(reference).id
         except (docker.errors.ImageNotFound, docker.errors.APIError):
             return None
-        return container_image_id == latest_img.id
 
     def get_image_display_version(self, image_or_tag) -> Optional[str]:
         """Version affichable : suffixe le short_id quand le label n'est pas un tag stable.
@@ -536,6 +520,22 @@ class NihilManager:
         except docker.errors.APIError as e:
             print(f"Error retrieving containers: {e}", file=sys.stderr)
             return []
+
+    def get_image_usage(self) -> Optional[Dict[str, List[str]]]:
+        """Map exact image IDs to all containers, including stopped containers.
+
+        None means Docker could not supply a complete inventory.
+        """
+        try:
+            usage: Dict[str, List[str]] = {}
+            for container in self.client.containers.list(all=True):
+                image_id = container.attrs.get("Image")
+                if not image_id:
+                    return None
+                usage.setdefault(image_id, []).append(container.name)
+            return {image_id: sorted(names) for image_id, names in usage.items()}
+        except docker.errors.APIError:
+            return None
 
     def list_images(self) -> List:
         try:
