@@ -41,6 +41,11 @@ nihil image switch upstream
 nihil image status
 ```
 
+`nihil info` shows the active source and its available variants. Installed
+images and containers remain visible across source switches, with a `SOURCE`
+column (`upstream`, `personal`, or `local`). Saved image copies with only a
+`nihil/*` tag are shown as local.
+
 After pushing, trigger the fork's build workflow for a specific variant and
 install the image published in its GHCR namespace:
 

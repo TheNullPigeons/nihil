@@ -94,6 +94,7 @@ class NihilController:
 
     def _configure_image_registry(self) -> None:
         """Point short image references to the currently active fork."""
+        self.manager.personal_image_repo = self.config.personal_image_repo
         if self.config.image_source_active != "personal" or not self.config.personal_image_repo:
             return
         owner = self.config.personal_image_repo.split("/", 1)[0].lower()
@@ -1081,6 +1082,7 @@ class NihilController:
             self._print_container_info(container, args, created=False)
             return 0
         print(self.formatter.info(f"Nihil version {__version__}\n"))
+        print(self.formatter.info(f"Active image source: {self.config.image_source_active}"))
         variant_descriptions = {
             "full": "The whole flock, every tool, every module",
             "ad": "Nest in their Active Directory",
@@ -1089,10 +1091,7 @@ class NihilController:
         }
         print(self.formatter.section_header("AVAILABLE IMAGE VARIANTS"))
         rows = []
-        local_variants = self.manager.list_local_variants()
-        all_variants = {**self.manager.AVAILABLE_IMAGES, **{
-            k: v for k, v in local_variants.items() if k not in self.manager.AVAILABLE_IMAGES
-        }}
+        all_variants = self.manager.AVAILABLE_IMAGES
         for variant, image_url in all_variants.items():
             description = variant_descriptions.get(variant, "Local build")
             info = self.manager.get_image_info(image_url)
@@ -1107,22 +1106,14 @@ class NihilController:
         print(self.formatter.section_header("INSTALLED IMAGES"))
         images = self.manager.list_images()
         if images:
-            # IDs des :latest courants pour chaque variant connu : sert à ne suffixer @<short_id> que sur les images dépassées
-            current_latest_ids = set()
-            for _variant, _tag in self.manager.AVAILABLE_IMAGES.items():
-                try:
-                    current_latest_ids.add(self.manager.client.images.get(_tag).id)
-                except Exception:
-                    pass
             rows = []
             for img in images:
                 tags = img.tags if img.tags else []
                 short = ", ".join(self.manager.short_image_name(t) for t in tags) or img.short_id
-                is_current = img.id in current_latest_ids
-                version = self.manager.get_version_label(img, is_current) or "-"
+                version = self.manager.get_image_display_version(img) or "-"
                 size = f"{img.attrs['Size'] / (1024**3):.2f} GB"
-                rows.append([short, version, size])
-            self.formatter.print_table(["IMAGE", "VERSION", "SIZE"], rows, [40, 30, 12])
+                rows.append([short, self.manager.get_image_source(img), version, size])
+            self.formatter.print_table(["IMAGE", "SOURCE", "VERSION", "SIZE"], rows, [40, 18, 30, 12])
         else:
             print("  No nihil images installed locally.")
             print("  Use 'nihil start <name> --image <variant>' to pull and use an image.")
@@ -1167,7 +1158,7 @@ class NihilController:
                     update_cell = "-"
                 is_privileged = c.attrs['HostConfig']['Privileged']
                 config = ("Privileged 💥", self.formatter.RED) if is_privileged else "Standard"
-                rows.append([name, status, image, update_cell, config])
+                rows.append([name, status, image, update_cell, config, self.manager.get_container_source(c)])
             def get_text_length(cell):
                 if isinstance(cell, tuple):
                     return len(str(cell[0]))
@@ -1177,7 +1168,7 @@ class NihilController:
             image_width = max(len("IMAGE"), max(get_text_length(row[2]) for row in rows)) + 2
             update_width = max(len("UPDATE"), max(get_text_length(row[3]) for row in rows)) + 2
             config_width = max(len("CONFIG"), max(get_text_length(row[4]) for row in rows)) + 2
-            self.formatter.print_table(["NAME", "STATUS", "IMAGE", "UPDATE", "CONFIG"], rows, [name_width, status_width, image_width, update_width, config_width])
+            self.formatter.print_table(["NAME", "STATUS", "IMAGE", "UPDATE", "CONFIG", "SOURCE"], rows, [name_width, status_width, image_width, update_width, config_width, 18])
         else:
             print("  No nihil containers found.")
         return 0
@@ -1457,6 +1448,7 @@ class NihilController:
             print(self.formatter.success(f"Saved tool selection: {len(enabled)} enabled"))
 
             if args.no_push:
+                source_manager.activate_personal(path, fork_repo, branch)
                 print(self.formatter.info(f"Prepared branch {branch} locally at {path}."))
                 return 0
 
@@ -1472,11 +1464,13 @@ class NihilController:
                 except subprocess.CalledProcessError as exc:
                     print(self.formatter.error(f"Git operation failed (exit {exc.returncode})."), file=sys.stderr)
                     return exc.returncode or 1
+                source_manager.activate_personal(path, fork_repo, branch)
                 print(self.formatter.success(f"Customization pushed to {fork_repo}:{branch}"))
                 return 0
 
             print(self.formatter.info(f"Changes remain local on {branch}: {path}"))
             if not Confirm.ask("Relaunch the tool selector?", default=True):
+                source_manager.activate_personal(path, fork_repo, branch)
                 return 0
 
     def _select_tools_tui(self, tools: list[dict], disabled: set[str], *, title: str) -> set[str] | None:

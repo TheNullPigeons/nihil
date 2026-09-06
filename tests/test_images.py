@@ -59,3 +59,58 @@ class TestShortImageName:
 
     def test_unknown_no_slash_unchanged(self):
         assert short_image_name("localonly") == "localonly"
+
+
+def test_inventory_does_not_depend_on_active_source():
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    import docker
+    from nihil.manager import NihilManager
+    from nihil.features.images import AVAILABLE_IMAGES
+
+    def image(reference, image_id, labels=None):
+        return SimpleNamespace(tags=[reference], id=image_id,
+                               attrs={"Config": {"Labels": labels or {}}})
+
+    upstream = image("ghcr.io/thenullpigeons/full:latest", "upstream")
+    personal = image("ghcr.io/alice/full:nihil-full-custom", "personal")
+    snapshot = image("nihil/full:nihil_full-custom", "old")
+    unrelated = image("redis:latest", "redis")
+    manager = NihilManager.__new__(NihilManager)
+    manager.personal_image_repo = "alice/nihil-images"
+    manager.client = Mock()
+    manager.client.images.list.return_value = [upstream, personal, snapshot, unrelated]
+    refs = {i.tags[0]: i for i in (upstream, personal, snapshot)}
+    def lookup(reference):
+        if reference not in refs:
+            raise docker.errors.ImageNotFound(reference)
+        return refs[reference]
+    manager.client.images.get.side_effect = lookup
+    current = SimpleNamespace(image=personal, attrs={"Config": {"Image": personal.tags[0]}})
+    old = SimpleNamespace(image=snapshot, attrs={"Config": {"Image": personal.tags[0]}})
+    missing = SimpleNamespace(image=snapshot, attrs={"Config": {"Image": "ghcr.io/alice/web:missing"}})
+    pinned_id = SimpleNamespace(image=personal, attrs={"Config": {"Image": "sha256:personal"}})
+    manager.client.containers.list.return_value = [current, old, missing]
+
+    for registry in (AVAILABLE_IMAGES, {"full": personal.tags[0]}):
+        manager.AVAILABLE_IMAGES = registry
+        assert manager.list_images() == [upstream, personal, snapshot]
+        assert manager.list_containers() == [current, old, missing]
+        assert manager.get_image_source(upstream) == "upstream"
+        assert manager.get_image_source(personal) == "personal"
+        assert manager.get_image_source(snapshot) == "local"
+        assert manager.get_container_source(old) == "personal"
+
+
+def test_labeled_images_from_other_forks_are_included():
+    from types import SimpleNamespace
+    from nihil.manager import NihilManager
+
+    manager = NihilManager.__new__(NihilManager)
+    labels = {"org.nihil.app": "Nihil"}
+    img = SimpleNamespace(tags=["ghcr.io/previous-owner/full:custom", "nihil/full:backup"],
+                          attrs={"Config": {"Labels": labels}})
+    assert manager.get_image_source(img) == "personal"
+    img.tags = []
+    assert manager.get_image_source(img) == "local"
+    assert manager.image_source("ghcr.io/stranger/redis:latest") == "Unknown"
