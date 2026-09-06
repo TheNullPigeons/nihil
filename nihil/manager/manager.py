@@ -108,6 +108,40 @@ class NihilManager:
             return None
         return self.get_image_display_version(image)
 
+    def image_source(self, reference: str, labels: Optional[Dict[str, str]] = None) -> str:
+        """Classify a reference independently of the active image registry."""
+        repository = reference.split("@", 1)[0].rsplit(":", 1)[0]
+        if repository in {tag.rsplit(":", 1)[0] for tag in AVAILABLE_IMAGES.values()}:
+            return "upstream"
+        if reference.startswith("nihil/"):
+            return "local"
+        personal_repo = getattr(self, "personal_image_repo", None)
+        if personal_repo:
+            owner = personal_repo.split("/", 1)[0].lower()
+            if repository in {f"ghcr.io/{owner}/{variant}" for variant in AVAILABLE_IMAGES}:
+                return "personal"
+        if (labels or {}).get("org.nihil.app", "").lower() == "nihil":
+            if reference.startswith("ghcr.io/"):
+                return "personal"
+            return "local"
+        return "Unknown"
+
+    def get_image_source(self, image) -> str:
+        labels = self.get_image_labels(image)
+        sources = {self.image_source(tag, labels) for tag in image.tags or []}
+        sources.discard("Unknown")
+        # A local snapshot alias does not hide an existing registry reference.
+        registry_sources = sources - {"local"}
+        return ", ".join(sorted(registry_sources or sources)) or self.image_source("", labels)
+
+    def get_container_source(self, container) -> str:
+        reference = container.attrs.get("Config", {}).get("Image", "")
+        try:
+            labels = self.get_image_labels(container.image)
+        except docker.errors.DockerException:
+            labels = {}
+        return self.image_source(reference, labels)
+
     def is_container_image_current(self, container) -> Optional[bool]:
         """True si l'image du container est l'image :latest locale du variant.
 
@@ -497,43 +531,16 @@ class NihilManager:
 
     def list_containers(self, all: bool = True) -> List:
         try:
-            containers = self.client.containers.list(all=all)
-            nihil_containers = []
-            for c in containers:
-                try:
-                    config_image = c.attrs.get('Config', {}).get('Image', '')
-                    known_images = set(self.AVAILABLE_IMAGES.values())
-                    created_from_nihil = "thenullpigeons" in config_image.lower() or "nihil" in config_image.lower()
-                    
-                    has_nihil_tag = False
-                    try:
-                        has_nihil_tag = c.image.tags and any(tag in known_images or "thenullpigeons" in tag for tag in c.image.tags)
-                    except Exception:
-                        pass
-                        
-                    if has_nihil_tag or created_from_nihil:
-                        nihil_containers.append(c)
-                except Exception as e:
-                    # On évite le spam intempestif des erreurs de metadata du Daemon
-                    pass
-            return nihil_containers
+            return [container for container in self.client.containers.list(all=all)
+                    if self.get_container_source(container) != "Unknown"]
         except docker.errors.APIError as e:
             print(f"Error retrieving containers: {e}", file=sys.stderr)
             return []
 
     def list_images(self) -> List:
         try:
-            images = self.client.images.list()
-            known_images = set(self.AVAILABLE_IMAGES.values())
-            nihil_images = []
-            for img in images:
-                if not img.tags:
-                    continue
-                for tag in img.tags:
-                    if tag in known_images or "thenullpigeons" in tag or tag.startswith("nihil/"):
-                        nihil_images.append(img)
-                        break
-            return nihil_images
+            return [image for image in self.client.images.list()
+                    if self.get_image_source(image) != "Unknown"]
         except docker.errors.APIError as e:
             print(f"Error retrieving images: {e}", file=sys.stderr)
             return []

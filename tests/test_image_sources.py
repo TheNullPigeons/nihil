@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+import pytest
 from types import SimpleNamespace
 
 from nihil.cli.parser import create_parser
@@ -83,7 +84,7 @@ def test_existing_fork_is_reused_and_custom_branch_is_created(tmp_path):
     assert result_path == path
     assert repo == "alice/nihil-images"
     assert branch == "nihil/web-custom"
-    assert saved["active"] == "personal"
+    assert saved == {}
     assert ["gh", "repo", "fork", "TheNullPigeons/nihil-images", "--clone=false"] not in calls
     assert ["git", "switch", "-c", "nihil/web-custom", "upstream/main"] in calls
 
@@ -182,3 +183,61 @@ def test_personal_source_uses_latest_without_a_custom_branch():
     NihilController._configure_image_registry(controller)
 
     assert controller.manager.AVAILABLE_IMAGES["full"] == "ghcr.io/alice/full:latest"
+
+
+@pytest.mark.parametrize("active", ["upstream", "personal"])
+@pytest.mark.parametrize("outcome", ["cancel", "missing_manifest", "push_failure", "save_local", "push"])
+def test_customization_only_activates_source_on_success(tmp_path, monkeypatch, active, outcome):
+    from copy import deepcopy
+    import subprocess
+    from unittest.mock import Mock
+    from nihil.cli.controller import NihilController
+    from nihil.config import NihilConfig
+
+    config = NihilConfig.__new__(NihilConfig)
+    config._data = {
+        "image_sources": {
+            "active": active,
+            "home": str(tmp_path),
+            "personal_repo": "alice/nihil-images",
+            "personal_branch": "nihil/ad-custom",
+            "personal_path": str(tmp_path / "previous"),
+        },
+        "build": {"images_path": str(tmp_path / "previous")},
+    }
+    config.save = Mock()
+    before = deepcopy(config._data)
+    source = ImageSourceManager(config)
+    # Exercise actual fork preparation and config transitions, without network/Git writes.
+    source._run = Mock(return_value="")
+    source._gh_user = Mock(return_value="alice")
+    source._default_branch = Mock(return_value="main")
+    path = tmp_path / "alice" / "nihil-images"
+    (path / "build" / "config").mkdir(parents=True)
+    if outcome != "missing_manifest":
+        (path / "build" / "config" / "tools.json").write_text(
+            json.dumps({"core_tools": [{"name": "vim"}], "mod_web": [{"name": "httpx"}]}))
+    controller = NihilController.__new__(NihilController)
+    controller.formatter = Mock()
+    controller.formatter.console = None
+    controller._select_tools_tui = Mock(return_value=None if outcome == "cancel" else {"httpx"})
+    monkeypatch.setattr("rich.prompt.Confirm.ask", lambda *a, **kw: True)
+    git = Mock()
+    if outcome == "push_failure":
+        git.side_effect = [None, None, subprocess.CalledProcessError(1, ["git", "push"])]
+    monkeypatch.setattr(subprocess, "run", git)
+    args = create_parser().parse_args(["image", "customize", "web"] +
+                                      (["--no-push"] if outcome == "save_local" else []))
+
+    rc = controller._customize_image(args, source)
+
+    if outcome in {"save_local", "push"}:
+        assert rc == 0
+        assert config.image_source_active == "personal"
+        assert config.personal_image_branch == "nihil/web-custom"
+        assert config.personal_image_path == path
+        config.save.assert_called_once()
+    else:
+        assert rc == (0 if outcome == "cancel" else 1)
+        assert config._data == before
+        config.save.assert_not_called()
