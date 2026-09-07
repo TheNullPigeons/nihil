@@ -73,3 +73,15 @@ nihil uninstall --unused
 The command previews the images and asks for confirmation. Add `--force` to skip
 confirmation; in this mode Docker removal is still unforced and containers are
 never deleted. Image names cannot be combined with `--unused`.
+
+When recreating a customization source, `--git-del` accepts a cleanup scope:
+
+```bash
+nihil image customize full --git-del local    # local clone only
+nihil image customize full --git-del distant  # remote branch and GHCR packages
+nihil image customize full --git-del all      # both local and remote resources
+```
+
+Using `--git-del` without a value keeps the legacy behavior and removes only the
+local clone. Remote cleanup asks for a separate confirmation and ignores remote
+branches or packages that do not exist.

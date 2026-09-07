@@ -132,6 +132,21 @@ class ImageSourceManager:
             "-f", "allowed_actions=all",
         ])
 
+    def _delete_remote_customization(self, fork_repo: str, branch: str) -> None:
+        """Delete the customization branch and its variant packages if present."""
+        try:
+            self._run(["gh", "api", "--method", "DELETE", f"repos/{fork_repo}/git/refs/heads/{branch}"])
+        except ImageSourceError as exc:
+            if "404" not in str(exc) and "Not Found" not in str(exc):
+                raise
+        owner = fork_repo.split("/", 1)[0]
+        for package in ("full", "ad", "web", "blueteam"):
+            try:
+                self._run(["gh", "api", "--method", "DELETE", f"users/{owner}/packages/container/{package}"])
+            except ImageSourceError as exc:
+                if "404" not in str(exc) and "Not Found" not in str(exc):
+                    raise
+
     def _ensure_git_remote(self, path: Path, name: str, url: str) -> None:
         remotes = self._run(["git", "remote"], cwd=path).splitlines()
         if name in remotes:
@@ -146,7 +161,7 @@ class ImageSourceManager:
         *,
         variant: str,
         git_protocol: str | None = None,
-        delete_existing: bool = False,
+        delete_existing: bool | str = False,
     ) -> tuple[Path, str, str]:
         """Create or reuse the fork and prepare a customization branch."""
         if git_protocol in (None, "auto"):
@@ -178,7 +193,10 @@ class ImageSourceManager:
             fork_url = f"https://github.com/{fork_repo}.git"
             upstream_url = f"https://github.com/{self.upstream_repo}.git"
 
-        if delete_existing and path.exists():
+        delete_mode = "local" if delete_existing is True else delete_existing
+        if delete_mode in {"distant", "all"}:
+            self._delete_remote_customization(fork_repo, branch)
+        if delete_mode in {"local", "all"} and path.exists():
             shutil.rmtree(path)
 
         if not (path / ".git").is_dir():

@@ -77,8 +77,9 @@ Examples:
         help="Git remote protocol (default: auto, follows your gh CLI configuration)",
     )
     customize_parser.add_argument(
-        "--git-del", action="store_true",
-        help="Delete the local clone before setup; reuse its remote branch when available",
+        "--git-del", nargs="?", choices=["local", "distant", "all"], const="local", default=False,
+        help=("Delete resources before setup: local clone, distant branch and GHCR "
+              "packages, or all (default when flag is used: local)"),
     )
     switch_parser = image_subparsers.add_parser("switch", help="Switch the active image source")
     switch_parser.add_argument("source", choices=["upstream", "personal"])

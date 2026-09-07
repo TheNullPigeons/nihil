@@ -1417,6 +1417,14 @@ class NihilController:
             print("Aborted.")
             return 0
 
+        delete_mode = getattr(args, "git_del", None)
+        if delete_mode in {"distant", "all"} and not Confirm.ask(
+            f"Delete the distant branch and GHCR packages ({delete_mode}) before setup?",
+            default=False,
+        ):
+            print("Aborted.")
+            return 0
+
         console = getattr(self.formatter, "console", None)
         loading = (
             console.status("[cyan]Preparing the GitHub fork and image source...[/]", spinner="dots")
@@ -1428,7 +1436,7 @@ class NihilController:
                 path, fork_repo, branch = source_manager.ensure_personal_fork(
                     variant=args.variant,
                     git_protocol=args.git_protocol,
-                    delete_existing=args.git_del,
+                    delete_existing=delete_mode or False,
                 )
         except ImageSourceError as exc:
             print(self.formatter.error(str(exc)), file=sys.stderr)
