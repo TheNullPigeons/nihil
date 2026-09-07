@@ -90,7 +90,7 @@ class ImageSourceManager:
     def _default_git_protocol(self) -> str:
         """Use the protocol configured in gh, falling back to HTTPS."""
         try:
-            protocol = self._run(["gh", "config", "get", "git_protocol"])
+            protocol = self._run(["gh", "config", "get", "git_protocol", "--host", "github.com"])
         except ImageSourceError:
             protocol = ""
         if protocol == "ssh" and self._has_ssh_key():
@@ -137,7 +137,8 @@ class ImageSourceManager:
         try:
             self._run(["gh", "api", "--method", "DELETE", f"repos/{fork_repo}/git/refs/heads/{branch}"])
         except ImageSourceError as exc:
-            if "404" not in str(exc) and "Not Found" not in str(exc):
+            message = str(exc)
+            if not any(marker in message for marker in ("404", "Not Found", "Reference does not exist")):
                 raise
         owner = fork_repo.split("/", 1)[0]
         for package in ("full", "ad", "web", "blueteam"):
@@ -145,6 +146,11 @@ class ImageSourceManager:
                 self._run(["gh", "api", "--method", "DELETE", f"users/{owner}/packages/container/{package}"])
             except ImageSourceError as exc:
                 if "404" not in str(exc) and "Not Found" not in str(exc):
+                    if "delete:packages" in str(exc) or "read:packages" in str(exc):
+                        raise ImageSourceError(
+                            f"{exc}\nRefresh GitHub CLI package scopes with:\n"
+                            "  gh auth refresh -h github.com -s read:packages,delete:packages"
+                        ) from exc
                     raise
 
     def _ensure_git_remote(self, path: Path, name: str, url: str) -> None:
