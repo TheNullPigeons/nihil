@@ -4,7 +4,7 @@ import pytest
 from types import SimpleNamespace
 
 from nihil.cli.parser import create_parser
-from nihil.features.image_sources import ImageSourceManager
+from nihil.features.image_sources import ImageSourceError, ImageSourceManager
 
 
 def test_image_commands_are_available():
@@ -43,6 +43,23 @@ def test_repository_urls_are_normalized(tmp_path):
     config = SimpleNamespace(image_sources_home=tmp_path)
     manager = ImageSourceManager(config, upstream_repo="https://github.com/acme/security-images.git")
     assert manager.upstream_repo == "acme/security-images"
+
+
+def test_auto_protocol_reads_github_host_configuration(tmp_path):
+    config = SimpleNamespace(image_sources_home=tmp_path)
+    manager = ImageSourceManager(config)
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        if command[:4] == ["gh", "config", "get", "git_protocol"]:
+            return "ssh"
+        return ""
+
+    manager._run = fake_run
+    manager._has_ssh_key = staticmethod(lambda: True)
+    assert manager._default_git_protocol() == "ssh"
+    assert ["gh", "config", "get", "git_protocol", "--host", "github.com"] in calls
 
 
 def test_existing_fork_is_reused_and_custom_branch_is_created(tmp_path):
@@ -175,6 +192,40 @@ def test_distant_cleanup_deletes_branch_and_all_variant_packages(tmp_path):
             "gh", "api", "--method", "DELETE",
             f"users/alice/packages/container/{package}",
         ] in calls
+
+
+def test_distant_cleanup_suggests_refreshing_package_scopes(tmp_path):
+    config = SimpleNamespace(
+        image_sources_home=tmp_path,
+        image_sources_upstream_path=tmp_path / "upstream" / "nihil-images",
+    )
+    manager = ImageSourceManager(config)
+    def fail_package_delete(command, **kwargs):
+        if "packages/container" in command[-1]:
+            raise ImageSourceError("Command failed: gh api: need delete:packages and read:packages scopes")
+        return ""
+    manager._run = fail_package_delete
+    with pytest.raises(ImageSourceError, match="gh auth refresh -h github.com -s read:packages,delete:packages"):
+        manager._delete_remote_customization("alice/nihil-images", "nihil/web-custom")
+
+
+def test_distant_cleanup_ignores_missing_branch(tmp_path):
+    config = SimpleNamespace(
+        image_sources_home=tmp_path,
+        image_sources_upstream_path=tmp_path / "upstream" / "nihil-images",
+    )
+    manager = ImageSourceManager(config)
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        if "git/refs/heads" in command[-1]:
+            raise ImageSourceError("Command failed: Reference does not exist (HTTP 422)")
+        return ""
+
+    manager._run = fake_run
+    manager._delete_remote_customization("alice/nihil-images", "nihil/web-custom")
+    assert sum("packages/container" in command[-1] for command in calls) == 4
 
 
 def test_trigger_build_dispatches_and_can_wait(tmp_path):
