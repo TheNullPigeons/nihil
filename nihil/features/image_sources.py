@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import shutil
 import json
@@ -40,18 +41,43 @@ class ImageSourceManager:
             raise ImageSourceError("The repository must use the owner/repo format or a GitHub URL.")
         return raw
 
-    def _run(self, command: list[str], *, cwd: Path | None = None, capture: bool = True) -> str:
+    @staticmethod
+    def _noninteractive_env() -> dict[str, str]:
+        """Make git and gh fail loudly instead of waiting on a prompt nobody can see."""
+        env = dict(os.environ)
+        env["GIT_TERMINAL_PROMPT"] = "0"
+        env.setdefault("GIT_SSH_COMMAND", "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new")
+        env["GH_PROMPT_DISABLED"] = "1"
+        env.pop("SSH_ASKPASS", None)
+        env.pop("SSH_ASKPASS_REQUIRE", None)
+        return env
+
+    def _run(
+        self,
+        command: list[str],
+        *,
+        cwd: Path | None = None,
+        capture: bool = True,
+        timeout: float | None = 300,
+    ) -> str:
         try:
             result = subprocess.run(
                 command,
                 cwd=str(cwd) if cwd else None,
                 check=True,
                 text=True,
+                env=self._noninteractive_env(),
+                stdin=subprocess.DEVNULL if capture else None,
                 stdout=subprocess.PIPE if capture else None,
                 stderr=subprocess.PIPE if capture else None,
+                timeout=timeout,
             )
         except FileNotFoundError as exc:
             raise ImageSourceError(f"Command not found: {command[0]}") from exc
+        except subprocess.TimeoutExpired as exc:
+            raise ImageSourceError(
+                f"Command timed out after {timeout:.0f}s: {' '.join(command)}"
+            ) from exc
         except subprocess.CalledProcessError as exc:
             output = (exc.stderr or exc.stdout or "").strip()
             detail = f": {output}" if output else ""
@@ -60,6 +86,35 @@ class ImageSourceManager:
 
     def _gh_user(self) -> str:
         return self._run(["gh", "api", "user", "--jq", ".login"])
+
+    def _default_git_protocol(self) -> str:
+        """Use the protocol configured in gh, falling back to HTTPS."""
+        try:
+            protocol = self._run(["gh", "config", "get", "git_protocol"])
+        except ImageSourceError:
+            protocol = ""
+        if protocol == "ssh" and self._has_ssh_key():
+            return "ssh"
+        return "https"
+
+    @staticmethod
+    def _has_ssh_key() -> bool:
+        """Report whether an SSH key is loaded in an agent or present on disk."""
+        try:
+            agent = subprocess.run(
+                ["ssh-add", "-l"],
+                text=True,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+            )
+            if agent.returncode == 0 and agent.stdout.strip():
+                return True
+        except (OSError, subprocess.SubprocessError):
+            pass
+        ssh_dir = Path.home() / ".ssh"
+        return ssh_dir.is_dir() and any(ssh_dir.glob("id_*"))
 
     def _default_branch(self, repo: str) -> str:
         return self._run([
@@ -90,19 +145,27 @@ class ImageSourceManager:
         self,
         *,
         variant: str,
-        git_protocol: str = "ssh",
+        git_protocol: str | None = None,
         delete_existing: bool = False,
     ) -> tuple[Path, str, str]:
         """Create or reuse the fork and prepare a customization branch."""
+        if git_protocol in (None, "auto"):
+            git_protocol = self._default_git_protocol()
         if git_protocol not in {"ssh", "https"}:
-            raise ImageSourceError("Git protocol must be 'ssh' or 'https'.")
+            raise ImageSourceError("Git protocol must be 'ssh', 'https' or 'auto'.")
         login = self._gh_user()
         repo_name = self.upstream_repo.rsplit("/", 1)[1]
         fork_repo = f"{login}/{repo_name}"
+        self.home.mkdir(parents=True, exist_ok=True)
         try:
             self._run(["gh", "repo", "view", fork_repo, "--json", "name"])
         except ImageSourceError:
-            self._run(["gh", "repo", "fork", self.upstream_repo, "--clone=false"])
+            # Fork from outside any git repository: inside one, gh offers to rewrite
+            # the local remotes through a prompt the caller never sees.
+            self._run(
+                ["gh", "repo", "fork", self.upstream_repo, "--clone=false"],
+                cwd=self.home,
+            )
         self._enable_actions(fork_repo)
 
         branch = f"nihil/{variant}-custom"
@@ -119,7 +182,15 @@ class ImageSourceManager:
             shutil.rmtree(path)
 
         if not (path / ".git").is_dir():
-            self._run(["git", "clone", fork_url, str(path)])
+            try:
+                self._run(["git", "clone", fork_url, str(path)])
+            except ImageSourceError as exc:
+                if git_protocol == "ssh":
+                    raise ImageSourceError(
+                        f"{exc}\nSSH clone failed. Retry with: nihil image customize "
+                        f"{variant} --git-protocol https"
+                    ) from exc
+                raise
         self._ensure_git_remote(path, "origin", fork_url)
         self._ensure_git_remote(path, "upstream", upstream_url)
         self._run(["git", "fetch", "upstream"], cwd=path)
@@ -214,7 +285,11 @@ class ImageSourceManager:
                 raise ImageSourceError(
                     "The workflow was dispatched, but its new run ID could not be found."
                 )
-            self._run(["gh", "run", "watch", run_id, "--repo", repo, "--exit-status"], capture=False)
+            self._run(
+                ["gh", "run", "watch", run_id, "--repo", repo, "--exit-status"],
+                capture=False,
+                timeout=None,
+            )
 
     def switch(self, source: str) -> Path:
         if source == "personal":

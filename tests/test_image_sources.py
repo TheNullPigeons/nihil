@@ -16,7 +16,7 @@ def test_image_commands_are_available():
     assert customize.variant == "web"
     assert customize.no_push is True
     assert customize.repo is None
-    assert customize.git_protocol == "ssh"
+    assert customize.git_protocol == "auto"
     assert customize.git_del is False
 
     https = parser.parse_args(["image", "customize", "web", "--git-protocol", "https"])
@@ -60,7 +60,7 @@ def test_existing_fork_is_reused_and_custom_branch_is_created(tmp_path):
 
     calls = []
 
-    def fake_run(command, *, cwd=None, capture=True):
+    def fake_run(command, *, cwd=None, capture=True, timeout=None):
         calls.append(command)
         if command[:3] == ["gh", "api", "user"]:
             return "alice"
@@ -100,7 +100,7 @@ def test_existing_remote_custom_branch_is_checked_out_after_local_reset(tmp_path
     manager = ImageSourceManager(config)
     calls = []
 
-    def fake_run(command, *, cwd=None, capture=True):
+    def fake_run(command, *, cwd=None, capture=True, timeout=None):
         calls.append(command)
         if command[:3] == ["gh", "api", "user"]:
             return "alice"
@@ -137,7 +137,7 @@ def test_trigger_build_dispatches_and_can_wait(tmp_path):
     manager = ImageSourceManager(config)
     calls = []
 
-    def fake_run(command, *, cwd=None, capture=True):
+    def fake_run(command, *, cwd=None, capture=True, timeout=None):
         calls.append(command)
         if command[:3] == ["gh", "run", "list"]:
             return json.dumps([{
