@@ -23,7 +23,11 @@ def test_image_commands_are_available():
     assert https.git_protocol == "https"
 
     delete = parser.parse_args(["image", "customize", "web", "--git-del"])
-    assert delete.git_del is True
+    assert delete.git_del == "local"
+
+    for mode in ("local", "distant", "all"):
+        parsed = parser.parse_args(["image", "customize", "web", "--git-del", mode])
+        assert parsed.git_del == mode
 
     switch = parser.parse_args(["image", "switch", "personal"])
     assert switch.image_action == "switch"
@@ -126,6 +130,51 @@ def test_existing_remote_custom_branch_is_checked_out_after_local_reset(tmp_path
     assert [
         "git", "switch", "-c", "nihil/web-custom", "--track", "origin/nihil/web-custom"
     ] in calls
+
+
+def test_distant_cleanup_deletes_branch_and_all_variant_packages(tmp_path):
+    config = SimpleNamespace(
+        image_sources_home=tmp_path,
+        image_sources_upstream_path=tmp_path / "upstream" / "nihil-images",
+    )
+    manager = ImageSourceManager(config)
+    calls = []
+
+    def fake_run(command, *, cwd=None, capture=True):
+        calls.append(command)
+        if command[:3] == ["gh", "api", "user"]:
+            return "alice"
+        if command[:4] == ["gh", "repo", "view", "alice/nihil-images"]:
+            return "name"
+        if command == ["git", "remote"]:
+            return "origin\nupstream"
+        if command[:4] == ["git", "remote", "get-url", "origin"]:
+            return "git@github.com:alice/nihil-images.git"
+        if command[:4] == ["git", "remote", "get-url", "upstream"]:
+            return "git@github.com:TheNullPigeons/nihil-images.git"
+        if command[:2] == ["git", "branch"] and "--remotes" in command:
+            return "origin/main"
+        if command[:2] == ["git", "branch"]:
+            return "main"
+        if command[:4] == ["gh", "repo", "view", "TheNullPigeons/nihil-images"]:
+            return "main"
+        if command[:3] == ["gh", "api", "--method"] and "DELETE" in command:
+            raise ImageSourceError("Command failed: 404 Not Found")
+        return ""
+
+    from nihil.features.image_sources import ImageSourceError
+    manager._run = fake_run
+    manager.ensure_personal_fork(variant="web", delete_existing="distant")
+
+    assert [
+        "gh", "api", "--method", "DELETE",
+        "repos/alice/nihil-images/git/refs/heads/nihil/web-custom",
+    ] in calls
+    for package in ("full", "ad", "web", "blueteam"):
+        assert [
+            "gh", "api", "--method", "DELETE",
+            f"users/alice/packages/container/{package}",
+        ] in calls
 
 
 def test_trigger_build_dispatches_and_can_wait(tmp_path):
