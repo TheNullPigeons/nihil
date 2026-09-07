@@ -896,7 +896,50 @@ class NihilController:
             print(self.formatter.error(f"Failed to pull image: {e}"))
             return 1
 
+    def _uninstall_unused_images(self, args) -> int:
+        if args.names:
+            print(self.formatter.error("--unused cannot be combined with image names."), file=sys.stderr)
+            return 1
+        usage = self.manager.get_image_usage()
+        if usage is None:
+            print(self.formatter.error("Cannot verify image usage. No images removed."), file=sys.stderr)
+            return 1
+        images = [img for img in self.manager.list_images() if not usage.get(img.id)]
+        if not images:
+            print(self.formatter.info("No unused Nihil images found."))
+            return 0
+        rows = [[img.short_id, ", ".join(img.tags or []) or "-",
+                 f"{img.attrs['Size'] / (1024**3):.2f} GB"] for img in images]
+        self.formatter.print_table(["IMAGE ID", "TAGS", "SIZE"], rows)
+        if not args.force:
+            try:
+                answer = input(self.formatter.info("Remove these unused images? [y/N] "))
+            except (EOFError, KeyboardInterrupt):
+                answer = "n"
+            if answer.lower() not in {"y", "yes"}:
+                print("Aborted.")
+                return 0
+        errors = 0
+        for img in images:
+            # Recheck after confirmation; never remove containers or force deletion.
+            usage = self.manager.get_image_usage()
+            if usage is None:
+                print(self.formatter.error("Cannot verify image usage. Stopping removal."), file=sys.stderr)
+                return 1
+            if usage.get(img.id):
+                print(self.formatter.warning(f"Skipping {img.short_id}: image is now used."))
+                continue
+            try:
+                self.manager.remove_unused_image(img.id)
+                print(self.formatter.success(f"Removed unused image {img.short_id}."))
+            except Exception as exc:
+                print(self.formatter.error(str(exc)), file=sys.stderr)
+                errors += 1
+        return 1 if errors else 0
+
     def _cmd_uninstall(self, args) -> int:
+        if getattr(args, "unused", False):
+            return self._uninstall_unused_images(args)
         raw_images = args.names
         resolved_images = []
         if not raw_images:
