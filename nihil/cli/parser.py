@@ -73,8 +73,8 @@ Examples:
         help="GitHub repository (owner/repo or URL; default: TheNullPigeons/nihil-images)",
     )
     customize_parser.add_argument(
-        "--git-protocol", choices=["ssh", "https"], default="ssh",
-        help="Git remote protocol (default: ssh; use https for HTTPS remotes)",
+        "--git-protocol", choices=["ssh", "https", "auto"], default="auto",
+        help="Git remote protocol (default: auto, follows your gh CLI configuration)",
     )
     customize_parser.add_argument(
         "--git-del", action="store_true",
