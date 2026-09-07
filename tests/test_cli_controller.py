@@ -138,3 +138,55 @@ class TestBuildPlatform:
         assert "--platform" not in command
         assert command[command.index("--tag") + 1] == "example/nihil:dev"
         assert command[-1] == str(tmp_path)
+
+
+class TestUninstallUnused:
+    def make_controller(self, mock_formatter):
+        from nihil.cli.controller import NihilController
+        c = NihilController.__new__(NihilController)
+        c.formatter = mock_formatter
+        c.manager = MagicMock()
+        c.manager.list_images.return_value = [
+            SimpleNamespace(id="sha256:used", short_id="used", tags=[], attrs={"Size": 1}),
+            SimpleNamespace(id="sha256:unused", short_id="unused", tags=[], attrs={"Size": 1}),
+        ]
+        return c
+
+    def test_only_unused_removed_without_force_or_pruning(self, mock_formatter):
+        c = self.make_controller(mock_formatter)
+        c.manager.get_image_usage.return_value = {"sha256:used": ["stopped-lab"]}
+        assert c._cmd_uninstall(SimpleNamespace(names=[], unused=True, force=True)) == 0
+        c.manager.remove_unused_image.assert_called_once_with("sha256:unused")
+        c.manager.remove_container.assert_not_called()
+        c.manager.stop_container.assert_not_called()
+
+    @pytest.mark.parametrize("usage", [None, {"sha256:used": ["lab"], "sha256:unused": ["new-lab"]}])
+    def test_usage_rechecked_before_removal(self, mock_formatter, usage):
+        c = self.make_controller(mock_formatter)
+        c.manager.get_image_usage.side_effect = [{"sha256:used": ["lab"]}, usage]
+        c._cmd_uninstall(SimpleNamespace(names=[], unused=True, force=True))
+        c.manager.remove_unused_image.assert_not_called()
+
+    def test_unknown_usage_aborts(self, mock_formatter):
+        c = self.make_controller(mock_formatter)
+        c.manager.get_image_usage.return_value = None
+        assert c._cmd_uninstall(SimpleNamespace(names=[], unused=True, force=True)) == 1
+        c.manager.remove_unused_image.assert_not_called()
+
+    def test_declined_confirmation_removes_nothing(self, mock_formatter):
+        c = self.make_controller(mock_formatter)
+        c.manager.get_image_usage.return_value = {}
+        with patch("builtins.input", return_value="n"):
+            assert c._cmd_uninstall(SimpleNamespace(names=[], unused=True, force=False)) == 0
+        c.manager.remove_unused_image.assert_not_called()
+
+    def test_names_rejected(self, mock_formatter):
+        c = self.make_controller(mock_formatter)
+        assert c._cmd_uninstall(SimpleNamespace(names=["full"], unused=True, force=True)) == 1
+        c.manager.remove_unused_image.assert_not_called()
+
+    def test_parser(self):
+        from nihil.cli.parser import create_parser
+        args = create_parser().parse_args(["uninstall", "--unused"])
+        assert args.unused is True
+        assert args.names == []
