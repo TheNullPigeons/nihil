@@ -152,3 +152,46 @@ def test_image_usage_does_not_report_unused_when_inventory_fails():
     manager.client.containers.list.side_effect = None
     manager.client.containers.list.return_value = []
     assert manager.get_image_usage() == {}
+
+
+def test_unused_image_removes_tag_and_digest_without_force():
+    from types import SimpleNamespace
+    from unittest.mock import Mock, call
+    import docker
+    from nihil.manager import NihilManager
+
+    manager = NihilManager.__new__(NihilManager)
+    manager.client = Mock()
+    manager.get_image_usage = Mock(return_value={})
+    image_id = "sha256:old"
+    tag = "nihil/full:main"
+    digest = "ghcr.io/thenullpigeons/full@sha256:digest"
+    img = SimpleNamespace(id=image_id, attrs={"RepoTags": [tag], "RepoDigests": [digest]})
+    conflict = docker.errors.APIError("multiple repositories", response=SimpleNamespace(status_code=409))
+    manager.client.images.remove.side_effect = [conflict, None, None]
+    manager.client.images.get.side_effect = [img, img, img, docker.errors.ImageNotFound("gone")]
+    manager.remove_unused_image(image_id)
+    assert manager.client.images.remove.call_args_list == [
+        call(image_id, force=False, noprune=True),
+        call(tag, force=False, noprune=True),
+        call(digest, force=False, noprune=True),
+    ]
+
+
+def test_unused_image_stops_if_container_appears_during_reference_removal():
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    import docker
+    import pytest
+    from nihil.manager import NihilManager
+
+    manager = NihilManager.__new__(NihilManager)
+    manager.client = Mock()
+    manager.get_image_usage = Mock(side_effect=[{}, {"sha256:old": ["lab"]}])
+    manager.client.images.remove.side_effect = docker.errors.APIError(
+        "conflict", response=SimpleNamespace(status_code=409))
+    manager.client.images.get.return_value = SimpleNamespace(attrs={
+        "RepoTags": ["nihil/full:main"], "RepoDigests": ["ghcr.io/alice/full@sha256:x"]})
+    with pytest.raises(RuntimeError, match="now used"):
+        manager.remove_unused_image("sha256:old")
+    manager.client.images.remove.assert_called_once_with("sha256:old", force=False, noprune=True)

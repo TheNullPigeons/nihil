@@ -128,7 +128,8 @@ Examples:
 
     uninstall_parser = subparsers.add_parser("uninstall", help="Remove nihil images")
     uninstall_parser.add_argument("names", nargs="*", help="Image name(s)")
-    uninstall_parser.add_argument("--force", "-f", action="store_true", help="Force removal")
+    uninstall_parser.add_argument("--unused", action="store_true", help="Remove only Nihil images unused by any container, including stopped containers")
+    uninstall_parser.add_argument("--force", "-f", action="store_true", help="Force removal (with --unused: skip confirmation only)")
 
     update_parser = subparsers.add_parser("update", help="Update installed nihil images")
     update_parser.add_argument("image", choices=["full", "ad", "web", "blueteam"], nargs="?", default=None, help="Image variant to update. If not specified, all installed images are updated.")
