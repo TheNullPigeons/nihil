@@ -1439,8 +1439,27 @@ class NihilController:
                     delete_existing=delete_mode or False,
                 )
         except ImageSourceError as exc:
-            print(self.formatter.error(str(exc)), file=sys.stderr)
-            return 1
+            message = str(exc)
+            refresh_command = ["gh", "auth", "refresh", "-h", "github.com", "-s", "read:packages,delete:packages"]
+            if "gh auth refresh -h github.com -s read:packages,delete:packages" in message:
+                if Confirm.ask("Missing GitHub package scopes. Run 'gh auth refresh -h github.com -s read:packages,delete:packages' now?", default=True):
+                    try:
+                        subprocess.run(refresh_command, check=True)
+                        with loading:
+                            path, fork_repo, branch = source_manager.ensure_personal_fork(
+                                variant=args.variant,
+                                git_protocol=args.git_protocol,
+                                delete_existing=delete_mode or False,
+                            )
+                    except (subprocess.CalledProcessError, ImageSourceError) as retry_exc:
+                        print(self.formatter.error(str(retry_exc)), file=sys.stderr)
+                        return 1
+                else:
+                    print(self.formatter.error(message), file=sys.stderr)
+                    return 1
+            else:
+                print(self.formatter.error(message), file=sys.stderr)
+                return 1
 
         manifest_path = path / "build" / "config" / "tools.json"
         if not manifest_path.is_file():
