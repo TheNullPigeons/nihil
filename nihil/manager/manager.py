@@ -521,6 +521,45 @@ class NihilManager:
             print(f"Error retrieving containers: {e}", file=sys.stderr)
             return []
 
+    def remove_unused_image(self, image_id: str) -> None:
+        """Remove an unused image and its references without forced deletion."""
+        def check_usage():
+            usage = self.get_image_usage()
+            if usage is None:
+                raise RuntimeError("Cannot verify image usage. Removal stopped.")
+            if usage.get(image_id):
+                raise RuntimeError(f"Image {image_id} is now used. Removal stopped.")
+
+        check_usage()
+        try:
+            self.client.images.remove(image_id, force=False, noprune=True)
+            return
+        except docker.errors.APIError as exc:
+            if exc.status_code != 409:
+                raise
+            img = self.client.images.get(image_id)
+            references = list(dict.fromkeys(
+                (img.attrs.get("RepoTags") or []) + (img.attrs.get("RepoDigests") or [])
+            ))
+            if len(references) < 2:
+                raise
+
+        for reference in references:
+            check_usage()
+            try:
+                referenced_image = self.client.images.get(reference)
+            except docker.errors.ImageNotFound:
+                continue
+            if referenced_image.id != image_id:
+                raise RuntimeError(f"Reference {reference} changed. Removal stopped.")
+            self.client.images.remove(reference, force=False, noprune=True)
+        try:
+            self.client.images.get(image_id)
+        except docker.errors.ImageNotFound:
+            return
+        check_usage()
+        self.client.images.remove(image_id, force=False, noprune=True)
+
     def get_image_usage(self) -> Optional[Dict[str, List[str]]]:
         """Map exact image IDs to all containers, including stopped containers.
 

@@ -63,3 +63,13 @@ nihil install web
 ```
 
 Use `nihil image build` to build all variants.
+
+To remove Nihil images that no container uses (including stopped containers):
+
+```bash
+nihil uninstall --unused
+```
+
+The command previews the images and asks for confirmation. Add `--force` to skip
+confirmation; in this mode Docker removal is still unforced and containers are
+never deleted. Image names cannot be combined with `--unused`.
