@@ -406,6 +406,10 @@ class NihilManager:
                                 "mode": "ro",
                             }
                             container_config["environment"]["XAUTHORITY"] = xauth_stable
+            # Required by Java/Swing and Qt applications when using a forwarded
+            # X11 display (Ghidra, for example), especially through XWayland.
+            container_config["environment"]["_JAVA_AWT_WM_NONREPARENTING"] = "1"
+            container_config["environment"]["QT_X11_NO_MITSHM"] = "1"
         effective_my_resources = my_resources_path if my_resources_path is not None else MY_RESOURCES_DIR
         if not disable_my_resources and effective_my_resources.exists():
             if "volumes" not in container_config:
@@ -442,6 +446,9 @@ class NihilManager:
                 )
             container_config["environment"]["NIHIL_BROWSER_UI"] = "1"
             container_config["environment"]["NIHIL_BROWSER_UI_PORT"] = str(browser_ui_port)
+            # Keep Java/Qt GUI applications compatible with the browser desktop.
+            container_config["environment"]["_JAVA_AWT_WM_NONREPARENTING"] = "1"
+            container_config["environment"]["QT_X11_NO_MITSHM"] = "1"
             if browser_ui_password:
                 container_config["environment"]["NIHIL_BROWSER_UI_PASSWORD"] = browser_ui_password
             if network_mode not in ("host", "none", "disabled"):
