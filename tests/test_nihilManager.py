@@ -129,6 +129,22 @@ class TestNihilManager:
                 assert config["stdin_open"] is True
                 assert config["privileged"] is False
                 assert config["hostname"] == "test-container"
+
+    def test_create_container_gui_sets_java_and_qt_compatibility(self, mock_docker_client):
+        """Les applications Java/Qt doivent recevoir les réglages GUI d'Exegol."""
+        mock_docker_client.containers.create.return_value = MagicMock()
+        mock_docker_client.images.get.return_value = MagicMock()
+
+        with patch('nihil.manager.manager.docker.from_env', return_value=mock_docker_client):
+            with patch('nihil.manager.manager.ensure_filesystem'):
+                with patch('nihil.manager.manager.os.environ', {'DISPLAY': ':1', 'XDG_SESSION_TYPE': 'wayland'}):
+                    with patch('nihil.utils.platform_info.get_host_os'):
+                        manager = NihilManager()
+                        manager.create_container("gui-container", enable_x11=True)
+
+        environment = mock_docker_client.containers.create.call_args.kwargs["environment"]
+        assert environment["_JAVA_AWT_WM_NONREPARENTING"] == "1"
+        assert environment["QT_X11_NO_MITSHM"] == "1"
     
     def test_create_container_sets_platform_on_arm(self, mock_docker_client):
         """Test création de container force linux/amd64 sur un hôte ARM."""
