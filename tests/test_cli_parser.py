@@ -59,6 +59,13 @@ class TestCreateParser:
         assert args.browser_ui is True
         assert args.no_shell is True
 
+    def test_parse_start_tmux(self):
+        parser = create_parser()
+        args = parser.parse_args(["start", "box", "--tmux"])
+        assert args.command == "start"
+        assert args.name == "box"
+        assert args.tmux is True
+
     def test_parse_stop(self):
         parser = create_parser()
         args = parser.parse_args(["stop", "c1"])

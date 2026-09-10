@@ -24,6 +24,37 @@ class TestMainEntryPoint:
             assert main() == 0
 
 
+class TestStartShellCommand:
+    """Tests pour le shell interactif lance par `nihil start`."""
+
+    @staticmethod
+    def _make_controller(default_shell):
+        from nihil.cli.controller import NihilController
+        controller = NihilController.__new__(NihilController)
+        controller.config = SimpleNamespace(default_shell=default_shell)
+        return controller
+
+    def test_tmux_flag_overrides_default_shell(self):
+        controller = self._make_controller("zsh")
+        args = SimpleNamespace(tmux=True)
+        assert controller._start_shell_command(args) == "tmux new-session -A -s nihil"
+
+    def test_tmux_config_opens_tmux(self):
+        controller = self._make_controller("tmux")
+        args = SimpleNamespace(tmux=False)
+        assert controller._start_shell_command(args) == "tmux new-session -A -s nihil"
+
+    def test_bash_config_opens_bash(self):
+        controller = self._make_controller("bash")
+        args = SimpleNamespace(tmux=False)
+        assert controller._start_shell_command(args) == "bash"
+
+    def test_unknown_config_falls_back_to_zsh(self):
+        controller = self._make_controller("fish")
+        args = SimpleNamespace(tmux=False)
+        assert controller._start_shell_command(args) == "zsh"
+
+
 class TestUninstallForce:
     """Tests pour `nihil uninstall <image> --force`."""
 

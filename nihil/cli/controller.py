@@ -4,6 +4,7 @@
 
 import os
 import secrets
+import shlex
 import subprocess
 import sys
 import time
@@ -33,6 +34,16 @@ class NihilController:
         self.parser = create_parser()
         self.manager = None
         self.formatter = NihilFormatter()
+
+    def _start_shell_command(self, args) -> str:
+        if getattr(args, "tmux", False):
+            return "tmux new-session -A -s nihil"
+        shell = getattr(self.config, "default_shell", "zsh")
+        if shell == "tmux":
+            return "tmux new-session -A -s nihil"
+        if shell == "bash":
+            return "bash"
+        return "zsh"
 
     def run(self, args: Optional[list] = None) -> int:
         parsed_args = self.parser.parse_args(args)
@@ -299,7 +310,7 @@ class NihilController:
             if verbose and not (browser_ui_enabled and not args.no_shell):
                 self._print_container_info(container, args, created=True, update_available=get_update(container))
         if not args.no_shell:
-            command = "zsh"
+            command = self._start_shell_command(args)
             vpn_path = getattr(args, "vpn", None)
             if container_existed and vpn_path:
                 if not self.manager.container_has_tun(container):
@@ -312,19 +323,28 @@ class NihilController:
                     if vpn_file.is_file():
                         if self.manager.copy_file_into_container(container, str(vpn_file), "/tmp/nihil_vpn.ovpn"):
                             print(self.formatter.info("VPN config copied into container; VPN will start for this session and stop when you exit."))
-                            command = "sh -c 'openvpn --config /tmp/nihil_vpn.ovpn --daemon >/dev/null 2>&1; sleep 2; zsh; killall openvpn >/dev/null 2>&1; exit 0'"
+                            vpn_script = (
+                                "openvpn --config /tmp/nihil_vpn.ovpn --daemon >/dev/null 2>&1; "
+                                f"sleep 2; {command}; "
+                                "killall openvpn >/dev/null 2>&1; exit 0"
+                            )
+                            command = f"sh -c {shlex.quote(vpn_script)}"
                         else:
                             print(self.formatter.warning("Could not copy VPN config into container. Start OpenVPN manually if needed."))
                     else:
                         print(self.formatter.warning(f"VPN file not found: {vpn_file}"))
-            if args.log and command == "zsh":
+            if args.log and not command.startswith("sh -c "):
                 import datetime
                 timestamp = datetime.datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
                 logfile = f"/workspace/logs/{timestamp}_shell.asciinema"
                 title = f"Nihil Session {timestamp}"
                 self.manager.exec_in_container(container, "mkdir -p /workspace/logs")
                 print(self.formatter.info(f"Logging session to {logfile}"))
-                command = f"asciinema rec -i 2 --stdin --quiet --command zsh --title '{title}' {logfile}"
+                command = (
+                    "asciinema rec -i 2 --stdin --quiet "
+                    f"--command {shlex.quote(command)} "
+                    f"--title {shlex.quote(title)} {shlex.quote(logfile)}"
+                )
             env_list = container.attrs.get("Config", {}).get("Env") or []
             browser_ui_port = None
             if any(e == "NIHIL_BROWSER_UI=1" for e in env_list):
