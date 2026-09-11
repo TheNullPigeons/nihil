@@ -346,6 +346,8 @@ class NihilManager:
                     volumes[str(x11_socket)] = {"bind": "/tmp/.X11-unix", "mode": "rw"}
         if volumes:
             container_config["volumes"] = volumes
+        if vpn and network_mode == "host":
+            network_mode = "bridge"
         if network_mode:
             container_config["network_mode"] = network_mode
         if vpn and vpn_config_path:
