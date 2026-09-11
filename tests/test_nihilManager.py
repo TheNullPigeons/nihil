@@ -287,6 +287,30 @@ class TestNihilManager:
         config = mock_docker_client.containers.create.call_args.kwargs
         assert config["network_mode"] == "bridge"
     
+    def test_recreate_vpn_container_never_uses_host_network(self, mock_docker_client):
+        """La recréation d'un container VPN garde le VPN hors du namespace réseau hôte."""
+        mock_docker_client.containers.create.return_value = MagicMock()
+        snapshot = {
+            "name": "vpn-container",
+            "image": "nihil/full:latest",
+            "privileged": False,
+            "hostname": "vpn-container",
+            "volumes": {},
+            "network_mode": "host",
+            "environment": {"NIHIL_VPN": "1"},
+            "ports": {},
+            "cap_add": ["NET_ADMIN"],
+            "devices": ["/dev/net/tun"],
+        }
+
+        with patch('nihil.manager.manager.docker.from_env', return_value=mock_docker_client):
+            with patch('nihil.manager.manager.ensure_filesystem'):
+                manager = NihilManager()
+                manager.recreate_container(snapshot)
+
+        config = mock_docker_client.containers.create.call_args.kwargs
+        assert config["network_mode"] == "bridge"
+
     def test_create_container_fails(self, mock_docker_client):
         """Test création de container échoue"""
         mock_docker_client.images.get.return_value = MagicMock()

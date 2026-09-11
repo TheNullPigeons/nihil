@@ -153,6 +153,37 @@ class TestCreateParser:
         args = parser.parse_args(["upgrade", "pentest", "--pull"])
         assert args.pull is True
 
+    def test_parse_upgrade_all(self):
+        parser = create_parser()
+        args = parser.parse_args(["upgrade", "--all"])
+        assert args.all is True
+        assert args.names == []
+
+    def test_parse_upgrade_start(self):
+        parser = create_parser()
+        args = parser.parse_args(["upgrade", "pentest", "--start"])
+        assert args.start is True
+        assert args.names == ["pentest"]
+
+    def test_parse_upgrade_with_config_options(self):
+        parser = create_parser()
+        args = parser.parse_args([
+            "upgrade", "pentest", "--privileged", "--network", "docker", "-w", "/tmp/workspace"
+        ])
+        assert args.command == "upgrade"
+        assert args.names == ["pentest"]
+        assert args.privileged is True
+        assert args.standard is False
+        assert args.network == "docker"
+        assert args.workspace == "/tmp/workspace"
+
+    def test_parse_upgrade_with_standard_and_workspace_here_short_option(self):
+        parser = create_parser()
+        args = parser.parse_args(["upgrade", "pentest", "--standard", "-W"])
+        assert args.standard is True
+        assert args.privileged is False
+        assert args.workspace_here is True
+
     def test_parse_tools_ctf(self):
         parser = create_parser()
         args = parser.parse_args(["tools", "blueteam"])
