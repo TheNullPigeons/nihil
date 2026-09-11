@@ -203,14 +203,14 @@ class NihilController:
                 "Host networking is not supported on this platform. Switching to 'docker' network mode."
             ))
             args.network = "docker"
-        if _host_os == HostOS.MACOS and getattr(args, "enable_x11", False):
+        enable_x11 = self.config.x11_by_default and not getattr(args, "disable_x11", False)
+        enable_wayland = self.config.wayland_by_default and not getattr(args, "disable_wayland", False)
+        args.enable_x11 = enable_x11
+        args.enable_wayland = enable_wayland
+        if _host_os == HostOS.MACOS and enable_x11:
             print(self.formatter.info(
                 "macOS detected: using XQuartz for X11. Make sure XQuartz is running and run 'xhost +localhost' on your host."
             ))
-        if not args.enable_x11 and self.config.x11_by_default:
-            args.enable_x11 = True
-        if not getattr(args, "enable_wayland", False) and self.config.wayland_by_default:
-            args.enable_wayland = True
         if not args.no_my_resources and not self.config.my_resources_enabled:
             args.no_my_resources = True
         if not getattr(args, "no_nihil_resources", False) and not self.config.nihil_resources_enabled:
@@ -338,8 +338,8 @@ class NihilController:
                 workspace=workspace_path,
                 vpn=bool(vpn_path),
                 vpn_config_path=vpn_path,
-                enable_x11=getattr(args, "enable_x11", False),
-                enable_wayland=getattr(args, "enable_wayland", False),
+                enable_x11=enable_x11,
+                enable_wayland=enable_wayland,
                 disable_my_resources=getattr(args, "no_my_resources", False),
                 my_resources_path=self.config.my_resources_path,
                 disable_nihil_resources=getattr(args, "no_nihil_resources", False),
