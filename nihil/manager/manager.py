@@ -847,10 +847,15 @@ class NihilManager:
         }
         if snapshot["volumes"]:
             container_config["volumes"] = snapshot["volumes"]
+        environment = snapshot.get("environment") or {}
+        if isinstance(environment, list):
+            environment = dict(kv.split("=", 1) for kv in environment if "=" in kv)
+        if environment.get("NIHIL_VPN") == "1" and snapshot.get("network_mode") == "host":
+            snapshot["network_mode"] = "bridge"
         if snapshot["network_mode"]:
             container_config["network_mode"] = snapshot["network_mode"]
-        if snapshot["environment"]:
-            container_config["environment"] = snapshot["environment"]
+        if environment:
+            container_config["environment"] = environment
         if snapshot["ports"]:
             container_config["ports"] = snapshot["ports"]
         if snapshot["cap_add"]:
