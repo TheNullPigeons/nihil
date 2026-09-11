@@ -67,6 +67,24 @@ class NihilController:
             f"Multiple VPN configs found in {vpn_dir}. Use: nihil start <name> --vpn /path/to/client.ovpn"
         )
 
+    def _apply_vpn_network_policy(self, args, explicit_network: bool) -> bool:
+        if not getattr(args, "vpn", None) or args.network != "host":
+            return True
+        if explicit_network:
+            print(self.formatter.error(
+                "VPN cannot be used with --network host because OpenVPN would modify the host network namespace. "
+                "Use --network docker or omit --network."
+            ), file=sys.stderr)
+            return False
+        print(self.formatter.warning(
+            "VPN requested: switching network mode from host to docker to keep VPN routes inside the container."
+        ))
+        args.network = "docker"
+        return True
+
+    def _container_uses_host_network(self, container) -> bool:
+        return (container.attrs.get("HostConfig") or {}).get("NetworkMode") == "host"
+
     def run(self, args: Optional[list] = None) -> int:
         parsed_args = self.parser.parse_args(args)
         should_show_banner = (
@@ -166,6 +184,7 @@ class NihilController:
 
         container_name = args.name
         verbose = getattr(args, "verbose", False)
+        explicit_network = args.network is not None
 
         def verbose_info(message: str) -> None:
             if verbose:
@@ -174,6 +193,8 @@ class NihilController:
         # Appliquer les defaults de config pour les options non spécifiées par l'utilisateur
         if args.network is None:
             args.network = self.config.default_network
+        if not self._apply_vpn_network_policy(args, explicit_network):
+            return 1
         from nihil.utils.platform_info import get_host_os, get_docker_engine, host_network_supported, HostOS
         _host_os = get_host_os()
         _docker_engine = get_docker_engine(self.manager.client)
@@ -213,6 +234,12 @@ class NihilController:
         container_existed = container is not None
         if container:
             verbose_info(f"Container '{container_name}' found.")
+            if getattr(args, "vpn", None) and self._container_uses_host_network(container):
+                print(self.formatter.error(
+                    "This existing container uses host networking. VPN is refused because OpenVPN would modify the host network namespace. "
+                    f"Recreate it with VPN support, e.g.: nihil remove {container_name} && nihil start {container_name} --vpn"
+                ))
+                return 1
             if container.status == "running":
                 if verbose:
                     print(self.formatter.warning(f"Container '{container_name}' is already running."))
