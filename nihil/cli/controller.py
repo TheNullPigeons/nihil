@@ -758,6 +758,19 @@ class NihilController:
     def _cmd_upgrade(self, args) -> int:
         """Met à jour l'image d'un ou plusieurs containers et les recrée à l'identique."""
         container_names: List[str] = getattr(args, "names", []) or []
+        upgrade_all = getattr(args, "all", False)
+        start_after_upgrade = getattr(args, "start", False)
+
+        if upgrade_all and container_names:
+            print(self.formatter.error("Use either explicit container names or --all, not both."))
+            return 1
+
+        if upgrade_all:
+            nihil_containers = self.manager.list_containers(all=True)
+            if not nihil_containers:
+                print(self.formatter.warning("No nihil containers found."))
+                return 0
+            container_names = [c.name for c in nihil_containers]
 
         # Si aucun nom fourni → sélection interactive parmi les containers nihil
         if not container_names:
@@ -816,9 +829,22 @@ class NihilController:
                 return 0
             container_names = selected
 
+        if start_after_upgrade and len(container_names) != 1:
+            print(self.formatter.error("--start can only be used when upgrading exactly one container."))
+            return 1
+
+        container_to_enter = None
+
         do_pull = getattr(args, "pull", False)
         force_upgrade = getattr(args, "force", False)
         requested_img = getattr(args, "image", None)
+        network_map = {"host": "host", "disabled": "none", "docker": "bridge", "nat": "bridge"}
+        requested_network = getattr(args, "network", None)
+        requested_workspace = getattr(args, "workspace", None)
+        if requested_workspace is None and getattr(args, "workspace_here", False):
+            requested_workspace = os.getcwd()
+        if requested_workspace is not None:
+            requested_workspace = str(Path(requested_workspace).expanduser().resolve())
 
         errors = 0
         for container_name in container_names:
@@ -835,6 +861,30 @@ class NihilController:
             # 2. Snapshot de la config + déterminer l'image cible
             snapshot = self.manager.snapshot_container_config(container)
             current_image_tag = snapshot["image"]
+            config_changes: List[str] = []
+
+            if getattr(args, "privileged", False) and not snapshot.get("privileged", False):
+                snapshot["privileged"] = True
+                config_changes.append("privileged: enabled")
+            elif getattr(args, "standard", False) and snapshot.get("privileged", False):
+                snapshot["privileged"] = False
+                config_changes.append("privileged: disabled")
+
+            if requested_network:
+                new_network_mode = network_map.get(requested_network, "host")
+                if snapshot.get("network_mode") != new_network_mode:
+                    snapshot["network_mode"] = new_network_mode
+                    config_changes.append(f"network: {requested_network}")
+
+            if requested_workspace is not None:
+                old_workspace = None
+                for src, mount in list(snapshot.get("volumes", {}).items()):
+                    if mount.get("bind") == "/workspace":
+                        old_workspace = src
+                        snapshot["volumes"].pop(src, None)
+                snapshot.setdefault("volumes", {})[requested_workspace] = {"bind": "/workspace", "mode": "rw"}
+                if old_workspace != requested_workspace:
+                    config_changes.append(f"workspace: {requested_workspace}")
 
             # Récupérer l'ID de l'image actuellement utilisée par le container (peut être dangling)
             try:
@@ -864,6 +914,8 @@ class NihilController:
             print(self.formatter.info(f"Container image: {current_label} ({current_image_tag})"))
             if target_image != current_image_tag:
                 print(self.formatter.info(f"Targeting image: {target_image}"))
+            for change in config_changes:
+                print(self.formatter.info(f"Changing {change}"))
 
             # 3. Pull la nouvelle image (uniquement si --pull)
             if do_pull:
@@ -899,24 +951,35 @@ class NihilController:
             except Exception:
                 pass
 
-            if old_id and new_id and old_id == new_id and not force_upgrade:
+            if old_id and new_id and old_id == new_id and not force_upgrade and not config_changes:
                 print(self.formatter.info(
                     "Container is already running on this image. "
-                    "Use --force to recreate anyway, --pull to fetch a newer one."
+                    "Use --force to recreate anyway, --pull to fetch a newer one, or pass config changes."
                 ))
+                if start_after_upgrade:
+                    container_to_enter = container
                 continue
 
             print(self.formatter.info("Backing up container specific files..."))
             paths_to_preserve = [
+                # Shell/application history
                 "/root/.bash_history",
                 "/root/.zsh_history",
                 "/root/.python_history",
+                "/root/.nihil-history",
+                # Tool databases and state
+                "/root/.idapro",
                 "/root/.nxc",
+                "/root/.netexec",
                 "/root/.cme",
+                "/root/.local/share/netexec",
+                "/root/.config/netexec",
+                "/root/.cache/netexec",
                 "/usr/share/responder/Responder.db",
                 "/usr/share/responder/Responder.conf",
                 "/root/.hashcat/hashcat.potfile",
                 "/root/.john/john.pot",
+                # Container-specific system config
                 "/etc/hosts",
                 "/etc/resolv.conf",
                 "/etc/proxychains.conf",
@@ -951,9 +1014,17 @@ class NihilController:
                     f"Container '{container_name}' upgraded and restarted successfully "
                     f"({old_label} → {new_label})."
                 ))
+                if start_after_upgrade:
+                    container_to_enter = new_container
             except Exception as e:
                 print(self.formatter.error(f"Failed to recreate container '{container_name}': {e}"))
                 errors += 1
+
+        if start_after_upgrade and container_to_enter is not None and errors == 0:
+            if container_to_enter.status != "running":
+                self.manager.start_container(container_to_enter)
+            command = self._start_shell_command(args)
+            self.manager.exec_in_container(container_to_enter, command)
 
         return 1 if errors > 0 else 0
 
