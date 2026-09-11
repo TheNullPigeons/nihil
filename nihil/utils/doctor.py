@@ -99,7 +99,7 @@ class NihilDoctor:
         results.append(DoctorCheckResult(
             "XQuartz installed",
             xquartz_ok,
-            "Found" if xquartz_ok else "Not found — required for --enable-x11 (https://www.xquartz.org)",
+            "Found" if xquartz_ok else "Not found — required for X11 forwarding (https://www.xquartz.org)",
         ))
         return results
 

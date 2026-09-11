@@ -38,7 +38,7 @@ _DEFAULT_CONFIG: dict = {
     },
     "display": {
         "x11_by_default": True,
-        "wayland_by_default": False,
+        "wayland_by_default": True,
     },
     "updates": {
         "auto_check": True,

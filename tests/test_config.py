@@ -50,7 +50,7 @@ class TestEnsureFilesystem:
 
 
 class TestNihilConfig:
-    def test_wayland_by_default_falls_back_to_false(self):
+    def test_wayland_by_default_falls_back_to_false_for_old_configs(self):
         config = NihilConfig.__new__(NihilConfig)
         config._data = {"display": {}}
 

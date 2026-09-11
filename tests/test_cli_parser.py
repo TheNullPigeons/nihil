@@ -66,12 +66,13 @@ class TestCreateParser:
         assert args.name == "box"
         assert args.tmux is True
 
-    def test_parse_start_wayland(self):
+    def test_parse_start_disable_display(self):
         parser = create_parser()
-        args = parser.parse_args(["start", "box", "--enable-wayland"])
+        args = parser.parse_args(["start", "box", "--disable-x11", "--disable-wayland"])
         assert args.command == "start"
         assert args.name == "box"
-        assert args.enable_wayland is True
+        assert args.disable_x11 is True
+        assert args.disable_wayland is True
 
     def test_parse_start_vpn_without_file(self):
         parser = create_parser()
