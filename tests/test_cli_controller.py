@@ -97,6 +97,52 @@ class TestVpnConfigResolution:
         assert controller._resolve_vpn_config_path(True) == str(vpn_file.resolve())
 
 
+class TestVpnNetworkPolicy:
+    """Tests pour éviter que le VPN modifie le réseau de l'hôte."""
+
+    @staticmethod
+    def _make_controller(formatter):
+        from nihil.cli.controller import NihilController
+        controller = NihilController.__new__(NihilController)
+        controller.formatter = formatter
+        return controller
+
+    def test_vpn_switches_default_host_network_to_docker(self, mock_formatter):
+        controller = self._make_controller(mock_formatter)
+        args = SimpleNamespace(vpn=True, network="host")
+
+        assert controller._apply_vpn_network_policy(args, explicit_network=False) is True
+        assert args.network == "docker"
+        mock_formatter.warning.assert_called_once()
+
+    def test_vpn_rejects_explicit_host_network(self, mock_formatter):
+        controller = self._make_controller(mock_formatter)
+        args = SimpleNamespace(vpn=True, network="host")
+
+        assert controller._apply_vpn_network_policy(args, explicit_network=True) is False
+        assert args.network == "host"
+        mock_formatter.error.assert_called_once()
+
+    def test_without_vpn_keeps_host_network(self, mock_formatter):
+        controller = self._make_controller(mock_formatter)
+        args = SimpleNamespace(vpn=None, network="host")
+
+        assert controller._apply_vpn_network_policy(args, explicit_network=True) is True
+        assert args.network == "host"
+
+    def test_detects_existing_host_network_container(self, mock_formatter):
+        controller = self._make_controller(mock_formatter)
+        container = SimpleNamespace(attrs={"HostConfig": {"NetworkMode": "host"}})
+
+        assert controller._container_uses_host_network(container) is True
+
+    def test_detects_existing_bridge_network_container(self, mock_formatter):
+        controller = self._make_controller(mock_formatter)
+        container = SimpleNamespace(attrs={"HostConfig": {"NetworkMode": "bridge"}})
+
+        assert controller._container_uses_host_network(container) is False
+
+
 class TestUninstallForce:
     """Tests pour `nihil uninstall <image> --force`."""
 
