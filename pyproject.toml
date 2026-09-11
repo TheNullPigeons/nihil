@@ -23,6 +23,7 @@ dev = [
 
 [project.scripts]
 nihil = "nihil.cli.controller:main"
+nh = "nihil.cli.controller:main"
 
 [tool.coverage.run]
 source = ["nihil"]
