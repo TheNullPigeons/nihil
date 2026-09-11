@@ -21,6 +21,7 @@ NIHIL_RESOURCES_REPO = "https://github.com/TheNullPigeons/nihil-resources.git"
 def ensure_filesystem() -> None:
     """Crée les répertoires et fichiers par défaut (~/.nihil/my-resources/setup/...)."""
     base = NIHIL_HOME / "my-resources" / "setup"
+    (NIHIL_HOME / "vpn").mkdir(parents=True, exist_ok=True)
 
     # --- zsh ---
     zsh_path = base / "zsh"

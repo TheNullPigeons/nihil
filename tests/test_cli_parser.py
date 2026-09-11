@@ -66,6 +66,20 @@ class TestCreateParser:
         assert args.name == "box"
         assert args.tmux is True
 
+    def test_parse_start_vpn_without_file(self):
+        parser = create_parser()
+        args = parser.parse_args(["start", "box", "--vpn"])
+        assert args.command == "start"
+        assert args.name == "box"
+        assert args.vpn is True
+
+    def test_parse_start_vpn_with_file(self):
+        parser = create_parser()
+        args = parser.parse_args(["start", "box", "--vpn", "~/vpn/client.ovpn"])
+        assert args.command == "start"
+        assert args.name == "box"
+        assert args.vpn == "~/vpn/client.ovpn"
+
     def test_parse_stop(self):
         parser = create_parser()
         args = parser.parse_args(["stop", "c1"])

@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 from typing import List, Optional
 
-from nihil.config import ensure_filesystem, NihilConfig
+from nihil.config import ensure_filesystem, NihilConfig, NIHIL_HOME
 from nihil.features.browser_ui import (
     save_password as browser_ui_save_password,
     load_password as browser_ui_load_password,
@@ -44,6 +44,28 @@ class NihilController:
         if shell == "bash":
             return "bash"
         return "zsh"
+
+    def _resolve_vpn_config_path(self, vpn_arg) -> Optional[str]:
+        if not vpn_arg:
+            return None
+        if vpn_arg is not True:
+            return str(Path(vpn_arg).expanduser().resolve())
+
+        vpn_dir = NIHIL_HOME / "vpn"
+        default_file = vpn_dir / "client.ovpn"
+        if default_file.is_file():
+            return str(default_file.resolve())
+
+        configs = sorted(vpn_dir.glob("*.ovpn"))
+        if len(configs) == 1:
+            return str(configs[0].resolve())
+        if not configs:
+            raise FileNotFoundError(
+                f"No VPN config found in {vpn_dir}. Add client.ovpn there or run: nihil start <name> --vpn /path/to/client.ovpn"
+            )
+        raise ValueError(
+            f"Multiple VPN configs found in {vpn_dir}. Use: nihil start <name> --vpn /path/to/client.ovpn"
+        )
 
     def run(self, args: Optional[list] = None) -> int:
         parsed_args = self.parser.parse_args(args)
@@ -249,7 +271,11 @@ class NihilController:
                     return 1
             image = self.manager.resolve_image_tag(image_arg) or self.manager.DEFAULT_IMAGE
             verbose_info(f"Using image variant: {image_arg} ({image})")
-            vpn_path = getattr(args, "vpn", None)
+            try:
+                vpn_path = self._resolve_vpn_config_path(getattr(args, "vpn", None))
+            except (FileNotFoundError, ValueError) as e:
+                print(self.formatter.error(str(e)), file=sys.stderr)
+                return 1
             workspace_path = args.workspace
             if workspace_path is None and getattr(args, "workspace_here", False):
                 workspace_path = os.getcwd()
@@ -311,7 +337,11 @@ class NihilController:
                 self._print_container_info(container, args, created=True, update_available=get_update(container))
         if not args.no_shell:
             command = self._start_shell_command(args)
-            vpn_path = getattr(args, "vpn", None)
+            try:
+                vpn_path = self._resolve_vpn_config_path(getattr(args, "vpn", None))
+            except (FileNotFoundError, ValueError) as e:
+                print(self.formatter.error(str(e)), file=sys.stderr)
+                return 1
             if container_existed and vpn_path:
                 if not self.manager.container_has_tun(container):
                     print(self.formatter.error(

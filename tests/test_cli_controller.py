@@ -55,6 +55,48 @@ class TestStartShellCommand:
         assert controller._start_shell_command(args) == "zsh"
 
 
+class TestVpnConfigResolution:
+    """Tests pour `nihil start --vpn` sans chemin explicite."""
+
+    @staticmethod
+    def _make_controller():
+        from nihil.cli.controller import NihilController
+        return NihilController.__new__(NihilController)
+
+    def test_vpn_file_is_returned_as_explicit_path(self, tmp_path):
+        controller = self._make_controller()
+        vpn_file = tmp_path / "lab.ovpn"
+        vpn_file.write_text("client\n", encoding="utf-8")
+
+        assert controller._resolve_vpn_config_path(str(vpn_file)) == str(vpn_file.resolve())
+
+    def test_vpn_without_file_uses_default_client_ovpn(self, tmp_path, monkeypatch):
+        import nihil.cli.controller as controller_module
+
+        monkeypatch.setattr(controller_module, "NIHIL_HOME", tmp_path)
+        vpn_dir = tmp_path / "vpn"
+        vpn_dir.mkdir()
+        vpn_file = vpn_dir / "client.ovpn"
+        vpn_file.write_text("client\n", encoding="utf-8")
+
+        controller = self._make_controller()
+
+        assert controller._resolve_vpn_config_path(True) == str(vpn_file.resolve())
+
+    def test_vpn_without_file_uses_only_ovpn(self, tmp_path, monkeypatch):
+        import nihil.cli.controller as controller_module
+
+        monkeypatch.setattr(controller_module, "NIHIL_HOME", tmp_path)
+        vpn_dir = tmp_path / "vpn"
+        vpn_dir.mkdir()
+        vpn_file = vpn_dir / "htb.ovpn"
+        vpn_file.write_text("client\n", encoding="utf-8")
+
+        controller = self._make_controller()
+
+        assert controller._resolve_vpn_config_path(True) == str(vpn_file.resolve())
+
+
 class TestUninstallForce:
     """Tests pour `nihil uninstall <image> --force`."""
 
