@@ -38,6 +38,7 @@ _DEFAULT_CONFIG: dict = {
     },
     "display": {
         "x11_by_default": True,
+        "wayland_by_default": False,
     },
     "updates": {
         "auto_check": True,
@@ -71,6 +72,7 @@ _CONFIG_COMMENT = """\
 # nihil_resources.path        : local path of the cloned nihil-resources repository
 # nihil_resources.auto_update : git pull nihil-resources at every container start
 # display.x11_by_default      : enable X11 forwarding by default
+# display.wayland_by_default  : enable Wayland socket forwarding by default
 # updates.auto_check          : check for image updates on start
 # build.images_path           : path to nihil-images source directory (for nihil build)
 # image_sources.active         : upstream | personal
@@ -201,6 +203,10 @@ class NihilConfig:
     @property
     def x11_by_default(self) -> bool:
         return bool(self._get("display", "x11_by_default"))
+
+    @property
+    def wayland_by_default(self) -> bool:
+        return bool(self._get("display", "wayland_by_default"))
 
     # ------------------------------------------------------------------
     # Propriétés: updates
