@@ -115,8 +115,8 @@ Examples:
         default=None,
         help="Start the container with OpenVPN. With FILE, use that .ovpn file; without FILE, use ~/.nihil/vpn/client.ovpn or the only .ovpn in ~/.nihil/vpn.",
     )
-    start_parser.add_argument("--enable-x11", action="store_true", help="Enable X11/XWayland GUI support (mount host X socket and forward DISPLAY).")
-    start_parser.add_argument("--enable-wayland", action="store_true", help="Enable Wayland support (mount host Wayland socket and forward WAYLAND_DISPLAY).")
+    start_parser.add_argument("--disable-x11", action="store_true", help="Disable X11/XWayland forwarding for this container.")
+    start_parser.add_argument("--disable-wayland", action="store_true", help="Disable Wayland socket forwarding for this container.")
     start_parser.add_argument("--no-my-resources", action="store_true", help="Do not mount '~/.nihil/my-resources' into the container.")
     start_parser.add_argument("--no-nihil-resources", action="store_true", help="Do not mount the shared 'nihil-resources' catalog into the container.")
     start_parser.add_argument("--browser-ui", action="store_true", help="Expose a browser-based UI (noVNC) for this session.")
