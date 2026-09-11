@@ -209,6 +209,8 @@ class NihilController:
             ))
         if not args.enable_x11 and self.config.x11_by_default:
             args.enable_x11 = True
+        if not getattr(args, "enable_wayland", False) and self.config.wayland_by_default:
+            args.enable_wayland = True
         if not args.no_my_resources and not self.config.my_resources_enabled:
             args.no_my_resources = True
         if not getattr(args, "no_nihil_resources", False) and not self.config.nihil_resources_enabled:
@@ -1343,6 +1345,7 @@ class NihilController:
             table.add_row("[bold]nihil_resources.path[/]", str(cfg.nihil_resources_path))
             table.add_row("[bold]nihil_resources.auto_update[/]", "[green]yes[/]" if cfg.nihil_resources_auto_update else "[red]no[/]")
             table.add_row("[bold]display.x11_by_default[/]", "[green]yes[/]" if cfg.x11_by_default else "[red]no[/]")
+            table.add_row("[bold]display.wayland_by_default[/]", "[green]yes[/]" if cfg.wayland_by_default else "[red]no[/]")
             table.add_row("[bold]updates.auto_check[/]", "[green]yes[/]" if cfg.auto_check_updates else "[red]no[/]")
             console.print(Panel(table, title="[bold]Nihil Configuration[/]", border_style="blue", padding=(0, 1)))
             print(self.formatter.info(f"Edit: nihil config --edit  or  $EDITOR {CONFIG_FILE}"))
