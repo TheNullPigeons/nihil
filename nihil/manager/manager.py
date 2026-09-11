@@ -312,6 +312,7 @@ class NihilManager:
         vpn: bool = False,
         vpn_config_path: Optional[str] = None,
         enable_x11: bool = False,
+        enable_wayland: bool = False,
         disable_my_resources: bool = False,
         my_resources_path: Optional[Path] = None,
         disable_nihil_resources: bool = False,
@@ -344,6 +345,17 @@ class NihilManager:
                 x11_socket = Path("/tmp/.X11-unix")
                 if display and x11_socket.exists():
                     volumes[str(x11_socket)] = {"bind": "/tmp/.X11-unix", "mode": "rw"}
+        if enable_wayland:
+            wayland_display = os.environ.get("WAYLAND_DISPLAY")
+            xdg_runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+            if wayland_display and xdg_runtime_dir:
+                wayland_socket = Path(xdg_runtime_dir) / wayland_display
+                if wayland_socket.exists():
+                    container_runtime_dir = f"/run/user/{os.getuid()}"
+                    volumes[str(wayland_socket)] = {
+                        "bind": f"{container_runtime_dir}/{wayland_display}",
+                        "mode": "rw",
+                    }
         if volumes:
             container_config["volumes"] = volumes
         if vpn and network_mode == "host":
@@ -412,6 +424,19 @@ class NihilManager:
             # X11 display (Ghidra, for example), especially through XWayland.
             container_config["environment"]["_JAVA_AWT_WM_NONREPARENTING"] = "1"
             container_config["environment"]["QT_X11_NO_MITSHM"] = "1"
+        if enable_wayland:
+            wayland_display = os.environ.get("WAYLAND_DISPLAY")
+            xdg_runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+            if wayland_display and xdg_runtime_dir and (Path(xdg_runtime_dir) / wayland_display).exists():
+                container_runtime_dir = f"/run/user/{os.getuid()}"
+                container_config["environment"] = container_config.get("environment") or {}
+                if isinstance(container_config["environment"], list):
+                    container_config["environment"] = dict(
+                        kv.split("=", 1) for kv in container_config["environment"] if "=" in kv
+                    )
+                container_config["environment"]["XDG_RUNTIME_DIR"] = container_runtime_dir
+                container_config["environment"]["WAYLAND_DISPLAY"] = wayland_display
+                container_config["environment"]["NIHIL_WAYLAND"] = "1"
         effective_my_resources = my_resources_path if my_resources_path is not None else MY_RESOURCES_DIR
         if not disable_my_resources and effective_my_resources.exists():
             if "volumes" not in container_config:
