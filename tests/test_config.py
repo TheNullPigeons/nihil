@@ -11,6 +11,7 @@ from nihil.config import (
     MY_RESOURCES_DIR,
     ensure_filesystem,
 )
+from nihil.config.user_config import NihilConfig
 class TestConfigPaths:
     """Vérification des constantes de chemins."""
 
@@ -46,3 +47,17 @@ class TestEnsureFilesystem:
         ensure_filesystem()
         base = tmp_path / "nihil" / "my-resources" / "setup"
         assert (base / "zsh" / "zshrc").exists()
+
+
+class TestNihilConfig:
+    def test_wayland_by_default_falls_back_to_false(self):
+        config = NihilConfig.__new__(NihilConfig)
+        config._data = {"display": {}}
+
+        assert config.wayland_by_default is False
+
+    def test_wayland_by_default_reads_config(self):
+        config = NihilConfig.__new__(NihilConfig)
+        config._data = {"display": {"wayland_by_default": True}}
+
+        assert config.wayland_by_default is True
