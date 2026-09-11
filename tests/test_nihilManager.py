@@ -145,6 +145,33 @@ class TestNihilManager:
         environment = mock_docker_client.containers.create.call_args.kwargs["environment"]
         assert environment["_JAVA_AWT_WM_NONREPARENTING"] == "1"
         assert environment["QT_X11_NO_MITSHM"] == "1"
+
+    def test_create_container_with_wayland_mounts_socket(self, mock_docker_client, tmp_path):
+        """Wayland expose uniquement le socket nécessaire au container."""
+        wayland_socket = tmp_path / "wayland-1"
+        wayland_socket.write_text("", encoding="utf-8")
+        mock_docker_client.containers.create.return_value = MagicMock()
+        mock_docker_client.images.get.return_value = MagicMock()
+
+        env = {
+            "WAYLAND_DISPLAY": "wayland-1",
+            "XDG_RUNTIME_DIR": str(tmp_path),
+        }
+        with patch('nihil.manager.manager.docker.from_env', return_value=mock_docker_client):
+            with patch('nihil.manager.manager.ensure_filesystem'):
+                with patch('nihil.manager.manager.os.environ', env):
+                    with patch('nihil.manager.manager.os.getuid', return_value=1000):
+                        manager = NihilManager()
+                        manager.create_container("wayland-container", enable_wayland=True)
+
+        config = mock_docker_client.containers.create.call_args.kwargs
+        assert config["volumes"][str(wayland_socket)] == {
+            "bind": "/run/user/1000/wayland-1",
+            "mode": "rw",
+        }
+        assert config["environment"]["XDG_RUNTIME_DIR"] == "/run/user/1000"
+        assert config["environment"]["WAYLAND_DISPLAY"] == "wayland-1"
+        assert config["environment"]["NIHIL_WAYLAND"] == "1"
     
     def test_create_container_sets_platform_on_arm(self, mock_docker_client):
         """Test création de container force linux/amd64 sur un hôte ARM."""
