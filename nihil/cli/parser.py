@@ -107,7 +107,14 @@ Examples:
     start_parser.add_argument("--image", default=None, metavar="VARIANT", help="Image variant to use (full|ad|web|blueteam or nihil/<variant>:local). If not specified, you will be prompted to select one.")
     start_parser.add_argument("--workspace", "-w", help="Workspace path to mount")
     start_parser.add_argument("--workspace-here", action="store_true", help="Mount the current working directory as /workspace inside the container.")
-    start_parser.add_argument("--vpn", metavar="FILE", default=None, help="Path to OpenVPN config file (.ovpn). Starts the container with VPN; VPN stops when you exit the container.")
+    start_parser.add_argument(
+        "--vpn",
+        nargs="?",
+        const=True,
+        metavar="FILE",
+        default=None,
+        help="Start the container with OpenVPN. With FILE, use that .ovpn file; without FILE, use ~/.nihil/vpn/client.ovpn or the only .ovpn in ~/.nihil/vpn.",
+    )
     start_parser.add_argument("--enable-x11", action="store_true", help="Enable X11/XWayland GUI support (mount host X socket and forward DISPLAY).")
     start_parser.add_argument("--no-my-resources", action="store_true", help="Do not mount '~/.nihil/my-resources' into the container.")
     start_parser.add_argument("--no-nihil-resources", action="store_true", help="Do not mount the shared 'nihil-resources' catalog into the container.")
