@@ -337,6 +337,7 @@ class NihilController:
                 vpn=bool(vpn_path),
                 vpn_config_path=vpn_path,
                 enable_x11=getattr(args, "enable_x11", False),
+                enable_wayland=getattr(args, "enable_wayland", False),
                 disable_my_resources=getattr(args, "no_my_resources", False),
                 my_resources_path=self.config.my_resources_path,
                 disable_nihil_resources=getattr(args, "no_nihil_resources", False),
@@ -523,6 +524,18 @@ class NihilController:
                 x11_display = f"[green]Enabled[/] (DISPLAY={display_env})"
         else:
             x11_display = "[red]Disabled[/]"
+        wayland_display_name = env.get("WAYLAND_DISPLAY")
+        xdg_runtime_dir = env.get("XDG_RUNTIME_DIR")
+        has_wayland_mount = bool(
+            wayland_display_name and xdg_runtime_dir and any(
+                m.get("Destination") == f"{xdg_runtime_dir}/{wayland_display_name}"
+                for m in mounts
+            )
+        )
+        if has_wayland_mount:
+            wayland_display = f"[green]Enabled[/] ({wayland_display_name})"
+        else:
+            wayland_display = "[red]Disabled[/]"
         browser_ui_flag = env.get("NIHIL_BROWSER_UI") == "1"
         browser_ui_port = env.get("NIHIL_BROWSER_UI_PORT") or "6901"
         if browser_ui_flag:
@@ -541,6 +554,7 @@ class NihilController:
         table.add_row("My resources", my_resources_display)
         table.add_row("VPN", vpn_display)
         table.add_row("X11", x11_display)
+        table.add_row("Wayland", wayland_display)
         table.add_row("Browser UI", browser_ui_display)
         if browser_ui_flag:
             if browser_ui_session:
