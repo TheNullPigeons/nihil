@@ -219,6 +219,26 @@ class TestNihilManager:
                 
                 call_args = mock_docker_client.containers.create.call_args
                 assert call_args.kwargs["network_mode"] == "host"
+
+    def test_create_container_with_vpn(self, mock_docker_client, tmp_path):
+        """Test création de container avec OpenVPN."""
+        vpn_file = tmp_path / "client.ovpn"
+        vpn_file.write_text("client\n", encoding="utf-8")
+        mock_container = MagicMock()
+        mock_docker_client.containers.create.return_value = mock_container
+        mock_docker_client.images.get.return_value = MagicMock()
+
+        with patch('nihil.manager.manager.docker.from_env', return_value=mock_docker_client):
+            with patch('nihil.manager.manager.ensure_filesystem'):
+                manager = NihilManager()
+                manager.create_container("test-container", vpn=True, vpn_config_path=str(vpn_file))
+
+        config = mock_docker_client.containers.create.call_args.kwargs
+        assert config["volumes"][str(vpn_file.resolve())]["bind"] == "/opt/nihil/vpn/client.ovpn"
+        assert config["volumes"][str(vpn_file.resolve())]["mode"] == "ro"
+        assert config["environment"]["NIHIL_VPN"] == "1"
+        assert config["cap_add"] == ["NET_ADMIN"]
+        assert config["devices"] == ["/dev/net/tun"]
     
     def test_create_container_fails(self, mock_docker_client):
         """Test création de container échoue"""
