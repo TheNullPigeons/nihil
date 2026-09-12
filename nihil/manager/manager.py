@@ -781,6 +781,48 @@ class NihilManager:
         except Exception:
             return None
 
+    def check_image_available(self, image_tag: str) -> Optional[bool]:
+        """Vérifie qu'un tag existe dans le registre sans télécharger l'image.
+
+        La requête ne récupère que le manifeste Docker/OCI. Elle retourne
+        ``True`` si le tag existe, ``False`` en cas de 404 et ``None`` si le
+        registre est inaccessible ou demande une authentification inconnue.
+        """
+        import json
+        import ssl
+        import urllib.error
+        import urllib.request
+
+        try:
+            if "/" not in image_tag:
+                return None
+            registry, rest = image_tag.split("/", 1)
+            repo, tag = rest.rsplit(":", 1) if ":" in rest else (rest, "latest")
+            ctx = ssl.create_default_context()
+            token_url = f"https://{registry}/token?scope=repository:{repo}:pull"
+            with urllib.request.urlopen(token_url, timeout=5, context=ctx) as resp:
+                token = json.loads(resp.read()).get("token", "")
+
+            manifest_url = f"https://{registry}/v2/{repo}/manifests/{tag}"
+            request = urllib.request.Request(manifest_url, method="HEAD")
+            request.add_header("Authorization", f"Bearer {token}")
+            request.add_header(
+                "Accept",
+                ", ".join((
+                    "application/vnd.oci.image.index.v1+json",
+                    "application/vnd.docker.distribution.manifest.list.v2+json",
+                    "application/vnd.docker.distribution.manifest.v2+json",
+                )),
+            )
+            with urllib.request.urlopen(request, timeout=5, context=ctx):
+                return True
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                return False
+            return None
+        except Exception:
+            return None
+
     def snapshot_container_config(self, container) -> Dict:
         """Extrait la configuration complète d'un container pour pouvoir le recréer à l'identique."""
         attrs = container.attrs
