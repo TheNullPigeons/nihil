@@ -8,6 +8,7 @@ import shlex
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import List, Optional
 
@@ -34,6 +35,30 @@ class NihilController:
         self.parser = create_parser()
         self.manager = None
         self.formatter = NihilFormatter()
+
+    def _image_registry_statuses(self, image_tags):
+        """Retourne la disponibilité des tags sans télécharger leurs couches."""
+        tags = list(dict.fromkeys(image_tags))
+        with ThreadPoolExecutor(max_workers=min(4, len(tags) or 1)) as executor:
+            results = executor.map(self.manager.check_image_available, tags)
+        return dict(zip(tags, results))
+
+    def _format_image_status(self, image_tag, registry_status):
+        """Décrit à la fois la disponibilité distante et l'état de la copie locale."""
+        if image_tag.startswith("nihil/"):
+            return ("Local", self.formatter.CYAN)
+        if registry_status is False:
+            return ("Unavailable", self.formatter.RED)
+        if registry_status is None:
+            return ("Unknown", self.formatter.YELLOW)
+        if self.manager.get_image_info(image_tag):
+            update = self.manager.check_image_update(image_tag)
+            if update is True:
+                return ("Update available", self.formatter.YELLOW)
+            if update is False:
+                return ("Updated", self.formatter.GREEN)
+            return ("Installed", self.formatter.YELLOW)
+        return "Available"
 
     def _start_shell_command(self, args) -> str:
         if getattr(args, "tmux", False):
@@ -268,6 +293,9 @@ class NihilController:
                     k: v for k, v in local_variants.items() if k not in self.manager.AVAILABLE_IMAGES
                 }}
                 variants = list(all_variants.keys())
+                registry_statuses = self._image_registry_statuses(
+                    [tag for tag in all_variants.values() if not tag.startswith("nihil/")]
+                )
                 rows = []
                 for i, variant in enumerate(variants):
                     if variant in local_variants and variant not in self.manager.AVAILABLE_IMAGES:
@@ -289,8 +317,9 @@ class NihilController:
                     else:
                         size_str = "-"
                         installed = "No"
-                    rows.append([str(i + 1), variant, desc, size_str, installed])
-                self.formatter.print_table(["#", "VARIANT", "DESCRIPTION", "SIZE", "INSTALLED"], rows)
+                    status = self._format_image_status(image_tag, registry_statuses.get(image_tag))
+                    rows.append([str(i + 1), variant, desc, size_str, installed, status])
+                self.formatter.print_table(["#", "VARIANT", "DESCRIPTION", "SIZE", "INSTALLED", "STATUS"], rows)
                 choices_indices = list(range(1, len(variants) + 1))
                 try:
                     choice = IntPrompt.ask("Select an image", choices=[str(c) for c in choices_indices], default=1)
@@ -1266,14 +1295,18 @@ class NihilController:
         }
         local_v = self.manager.list_local_variants()
         all_v = {**self.manager.AVAILABLE_IMAGES, **{k: v for k, v in local_v.items() if k not in self.manager.AVAILABLE_IMAGES}}
+        registry_statuses = self._image_registry_statuses(
+            [tag for tag in all_v.values() if not tag.startswith("nihil/")]
+        )
         for variant, image_url in all_v.items():
             description = variant_descriptions.get(variant, "Local build")
             info = self.manager.get_image_info(image_url)
             size_str = f"{info['size_bytes'] / (1024**3):.2f} GB" if info else "-"
             # AVAILABLE liste les :latest courants : pas besoin de @short_id de disambiguation
             version = self.manager.get_image_version(image_url) or "-"
-            rows.append([variant, self.manager.short_image_name(image_url), version, size_str, description])
-        self.formatter.print_table(["VARIANT", "IMAGE", "VERSION", "SIZE", "DESCRIPTION"], rows)
+            status = self._format_image_status(image_url, registry_statuses.get(image_url))
+            rows.append([variant, self.manager.short_image_name(image_url), version, size_str, status, description])
+        self.formatter.print_table(["VARIANT", "IMAGE", "VERSION", "SIZE", "STATUS", "DESCRIPTION"], rows)
         print()
         print(self.formatter.info("Usage: nihil start <name> --image <variant>"))
         return 0
@@ -1299,14 +1332,16 @@ class NihilController:
         print(self.formatter.section_header("AVAILABLE IMAGE VARIANTS"))
         rows = []
         all_variants = self.manager.AVAILABLE_IMAGES
+        registry_statuses = self._image_registry_statuses(list(all_variants.values()))
         for variant, image_url in all_variants.items():
             description = variant_descriptions.get(variant, "Local build")
             info = self.manager.get_image_info(image_url)
             size_str = f"{info['size_bytes'] / (1024**3):.2f} GB" if info else "-"
             # AVAILABLE liste les :latest courants : pas besoin de @short_id de disambiguation
             version = self.manager.get_image_version(image_url) or "-"
-            rows.append([variant, self.manager.short_image_name(image_url), version, size_str, description])
-        self.formatter.print_table(["VARIANT", "IMAGE", "VERSION", "SIZE", "DESCRIPTION"], rows)
+            status = self._format_image_status(image_url, registry_statuses.get(image_url))
+            rows.append([variant, self.manager.short_image_name(image_url), version, size_str, status, description])
+        self.formatter.print_table(["VARIANT", "IMAGE", "VERSION", "SIZE", "STATUS", "DESCRIPTION"], rows)
         print()
         print(self.formatter.info("Use 'nihil start <name> --image <variant>' to create a container with a specific image."))
         print()
