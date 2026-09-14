@@ -1825,6 +1825,7 @@ class NihilController:
             return resp in ("", "y", "yes", "o", "oui")
 
     def _clone_nihil_resources(self, target: Path, repo_url: Optional[str] = None) -> int:
+        from contextlib import nullcontext
         import shutil
         import subprocess
 
@@ -1836,11 +1837,18 @@ class NihilController:
         url = repo_url or NIHIL_RESOURCES_REPO
         target.parent.mkdir(parents=True, exist_ok=True)
         print(self.formatter.info(f"Cloning {url} into {target} (with submodules)..."))
+        console = getattr(self.formatter, "console", None)
+        loading = (
+            console.status("[cyan]Downloading nihil-resources...[/]", spinner="dots")
+            if console
+            else nullcontext()
+        )
         try:
-            subprocess.run(
-                ["git", "clone", "--quiet", "--recurse-submodules", url, str(target)],
-                check=True,
-            )
+            with loading:
+                subprocess.run(
+                    ["git", "clone", "--quiet", "--recurse-submodules", url, str(target)],
+                    check=True,
+                )
         except subprocess.CalledProcessError as e:
             print(self.formatter.error(f"git clone failed (exit {e.returncode})."), file=sys.stderr)
             return e.returncode or 1
