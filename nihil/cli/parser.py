@@ -184,6 +184,7 @@ Examples:
     resources_update = resources_subparsers.add_parser("update", help="git pull the local nihil-resources repository")
     resources_sync = resources_subparsers.add_parser("sync", help="Run the nihil-resources scripts/sync.py to fetch enabled tools")
     resources_sync.add_argument("--profile", default=None, help="Restrict sync to a profile (full|ad|web|blueteam)")
+    resources_sync.add_argument("--verbose", "-v", action="store_true", help="Show the full per-resource output instead of a summary")
     resources_subparsers.add_parser("status", help="Show local nihil-resources status (path, branch, last commit)")
 
     completion_parser = subparsers.add_parser("completion", help="Generate shell completion script")

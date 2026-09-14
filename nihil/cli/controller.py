@@ -1837,7 +1837,10 @@ class NihilController:
         target.parent.mkdir(parents=True, exist_ok=True)
         print(self.formatter.info(f"Cloning {url} into {target} (with submodules)..."))
         try:
-            subprocess.run(["git", "clone", "--recurse-submodules", url, str(target)], check=True)
+            subprocess.run(
+                ["git", "clone", "--quiet", "--recurse-submodules", url, str(target)],
+                check=True,
+            )
         except subprocess.CalledProcessError as e:
             print(self.formatter.error(f"git clone failed (exit {e.returncode})."), file=sys.stderr)
             return e.returncode or 1
@@ -1867,12 +1870,45 @@ class NihilController:
         profile = getattr(args, "profile", None)
         if profile:
             cmd.extend(["--profile", profile])
-        print(self.formatter.info(f"Running {' '.join(cmd)}..."))
+
+        verbose = getattr(args, "verbose", False)
+        if verbose:
+            print(self.formatter.info(f"Running {' '.join(cmd)}..."))
+            sys.stdout.flush()
+            try:
+                return subprocess.run(cmd, cwd=str(path)).returncode
+            except FileNotFoundError as e:
+                print(self.formatter.error(f"Failed to run sync.py: {e}"), file=sys.stderr)
+                return 1
+
+        # Par défaut : masque le détail par ressource (bruyant avec un gros catalogue)
+        # et n'affiche qu'un résumé, sauf en cas d'échec ou de --verbose.
         try:
-            return subprocess.run(cmd, cwd=str(path)).returncode
+            result = subprocess.run(cmd, cwd=str(path), capture_output=True, text=True)
         except FileNotFoundError as e:
             print(self.formatter.error(f"Failed to run sync.py: {e}"), file=sys.stderr)
             return 1
+
+        lines = result.stdout.splitlines()
+        synced = [line for line in lines if line.startswith("sync ")]
+        skipped = [line for line in lines if line.startswith("skip ")]
+        other = [line for line in lines if line not in synced and line not in skipped]
+        for line in other:
+            print(line)
+        for line in synced:
+            print(self.formatter.success(line.strip()))
+
+        if result.returncode != 0:
+            print(self.formatter.error(f"resources sync failed (exit {result.returncode})."), file=sys.stderr)
+            if result.stderr.strip():
+                print(result.stderr.strip(), file=sys.stderr)
+            return result.returncode
+
+        if synced:
+            print(self.formatter.info(f"{len(synced)} resource(s) synced, {len(skipped)} already up to date."))
+        elif skipped:
+            print(self.formatter.info(f"All resources already up to date ({len(skipped)})."))
+        return 0
 
     def _resources_status(self) -> int:
         import subprocess
@@ -1930,8 +1966,8 @@ class NihilController:
             print(self.formatter.info(f"git -C {path} pull --ff-only"))
         try:
             result = subprocess.run(
-                ["git", "-C", str(path), "pull", "--ff-only"],
-                capture_output=quiet,
+                ["git", "-C", str(path), "pull", "--ff-only", "--quiet"],
+                capture_output=True,
                 text=True,
             )
         except FileNotFoundError:
@@ -1946,12 +1982,16 @@ class NihilController:
                 ))
             else:
                 print(self.formatter.error(f"git pull failed (exit {result.returncode})."), file=sys.stderr)
+                if result.stderr.strip():
+                    print(result.stderr.strip(), file=sys.stderr)
             return result.returncode
         if not quiet:
             print(self.formatter.info(f"git -C {path} submodule update --init --recursive --remote --merge"))
+        # --quiet masque le détail par submodule (checkout, progression de fetch) :
+        # avec des dizaines de submodules, c'est le principal contributeur de bruit.
         sub_result = subprocess.run(
-            ["git", "-C", str(path), "submodule", "update", "--init", "--recursive", "--remote", "--merge"],
-            capture_output=quiet,
+            ["git", "-C", str(path), "submodule", "update", "--init", "--recursive", "--remote", "--merge", "--quiet"],
+            capture_output=True,
             text=True,
         )
         if sub_result.returncode != 0:
@@ -1961,6 +2001,8 @@ class NihilController:
                 ))
             else:
                 print(self.formatter.error(f"submodule update failed (exit {sub_result.returncode})."), file=sys.stderr)
+                if sub_result.stderr.strip():
+                    print(sub_result.stderr.strip(), file=sys.stderr)
             return sub_result.returncode
         if not quiet:
             print(self.formatter.success("nihil-resources up to date."))
