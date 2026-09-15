@@ -8,6 +8,7 @@ import shlex
 import subprocess
 import sys
 import time
+from contextlib import nullcontext
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -35,6 +36,12 @@ class NihilController:
         self.parser = create_parser()
         self.manager = None
         self.formatter = NihilFormatter()
+
+    def _loading(self, message: str):
+        console = getattr(self.formatter, "console", None)
+        if not console:
+            return nullcontext()
+        return console.status(f"[cyan]{message}[/]", spinner="dots")
 
     def _image_registry_statuses(self, image_tags):
         """Retourne la disponibilité des tags sans télécharger leurs couches."""
@@ -1115,11 +1122,12 @@ class NihilController:
         if args.names:
             print(self.formatter.error("--unused cannot be combined with image names."), file=sys.stderr)
             return 1
-        usage = self.manager.get_image_usage()
-        if usage is None:
-            print(self.formatter.error("Cannot verify image usage. No images removed."), file=sys.stderr)
-            return 1
-        images = [img for img in self.manager.list_images() if not usage.get(img.id)]
+        with self._loading("Searching unused Nihil images..."):
+            usage = self.manager.get_image_usage()
+            if usage is None:
+                print(self.formatter.error("Cannot verify image usage. No images removed."), file=sys.stderr)
+                return 1
+            images = [img for img in self.manager.list_images() if not usage.get(img.id)]
         if not images:
             print(self.formatter.info("No unused Nihil images found."))
             return 0
@@ -1145,7 +1153,8 @@ class NihilController:
                 print(self.formatter.warning(f"Skipping {img.short_id}: image is now used."))
                 continue
             try:
-                self.manager.remove_unused_image(img.id)
+                with self._loading(f"Removing unused image {img.short_id}..."):
+                    self.manager.remove_unused_image(img.id)
                 print(self.formatter.success(f"Removed unused image {img.short_id}."))
             except Exception as exc:
                 print(self.formatter.error(str(exc)), file=sys.stderr)
@@ -1237,10 +1246,10 @@ class NihilController:
                         container = self.manager.get_container(container_name)
                         if container:
                             if container.status == "running":
-                                print(self.formatter.info(f"Stopping container '{container_name}'..."))
-                                self.manager.stop_container(container)
-                            print(self.formatter.info(f"Removing container '{container_name}'..."))
-                            self.manager.remove_container(container, force=True)
+                                with self._loading(f"Stopping container '{container_name}'..."):
+                                    self.manager.stop_container(container)
+                            with self._loading(f"Removing container '{container_name}'..."):
+                                self.manager.remove_container(container, force=True)
                             print(self.formatter.success(f"Container '{container_name}' removed successfully."))
                     except Exception as e:
                         print(self.formatter.error(f"Failed to remove container '{container_name}': {e}"), file=sys.stderr)
@@ -1258,9 +1267,9 @@ class NihilController:
                 return 0
         errors = 0
         for image in images:
-            print(self.formatter.info(f"Removing image '{image}'..."))
             try:
-                self.manager.remove_image(image, force=args.force)
+                with self._loading(f"Removing image '{image}'..."):
+                    self.manager.remove_image(image, force=args.force)
                 print(self.formatter.success(f"Image '{image}' removed successfully."))
             except Exception as e:
                 print(self.formatter.error(str(e)), file=sys.stderr)
@@ -1751,13 +1760,14 @@ class NihilController:
 
             if Confirm.ask(f"Commit and push {branch} to {fork_repo}?", default=True):
                 try:
-                    subprocess.run(["git", "add", "build/config/tool-selection.json"], cwd=path, check=True)
-                    subprocess.run(
-                        ["git", "commit", "-m", f"Customize {args.variant} image tools"],
-                        cwd=path,
-                        check=True,
-                    )
-                    subprocess.run(["git", "push", "--set-upstream", "origin", branch], cwd=path, check=True)
+                    with self._loading(f"Pushing {branch} to {fork_repo}..."):
+                        subprocess.run(["git", "add", "build/config/tool-selection.json"], cwd=path, check=True)
+                        subprocess.run(
+                            ["git", "commit", "-m", f"Customize {args.variant} image tools"],
+                            cwd=path,
+                            check=True,
+                        )
+                        subprocess.run(["git", "push", "--set-upstream", "origin", branch], cwd=path, check=True)
                 except subprocess.CalledProcessError as exc:
                     print(self.formatter.error(f"Git operation failed (exit {exc.returncode})."), file=sys.stderr)
                     return exc.returncode or 1
@@ -1859,10 +1869,11 @@ class NihilController:
         target.parent.mkdir(parents=True, exist_ok=True)
         print(self.formatter.info(f"Cloning {url} into {target} (with submodules)..."))
         try:
-            subprocess.run(
-                ["git", "clone", "--quiet", "--recurse-submodules", url, str(target)],
-                check=True,
-            )
+            with self._loading("Downloading nihil-resources..."):
+                subprocess.run(
+                    ["git", "clone", "--quiet", "--recurse-submodules", url, str(target)],
+                    check=True,
+                )
         except subprocess.CalledProcessError as e:
             print(self.formatter.error(f"git clone failed (exit {e.returncode})."), file=sys.stderr)
             return e.returncode or 1
@@ -1906,7 +1917,8 @@ class NihilController:
         # Par défaut : masque le détail par ressource (bruyant avec un gros catalogue)
         # et n'affiche qu'un résumé, sauf en cas d'échec ou de --verbose.
         try:
-            result = subprocess.run(cmd, cwd=str(path), capture_output=True, text=True)
+            with self._loading("Syncing nihil-resources catalog..."):
+                result = subprocess.run(cmd, cwd=str(path), capture_output=True, text=True)
         except FileNotFoundError as e:
             print(self.formatter.error(f"Failed to run sync.py: {e}"), file=sys.stderr)
             return 1
@@ -1987,11 +1999,12 @@ class NihilController:
         if not quiet:
             print(self.formatter.info(f"git -C {path} pull --ff-only"))
         try:
-            result = subprocess.run(
-                ["git", "-C", str(path), "pull", "--ff-only", "--quiet"],
-                capture_output=True,
-                text=True,
-            )
+            with self._loading("Updating nihil-resources..."):
+                result = subprocess.run(
+                    ["git", "-C", str(path), "pull", "--ff-only", "--quiet"],
+                    capture_output=True,
+                    text=True,
+                )
         except FileNotFoundError:
             if not quiet:
                 print(self.formatter.error("git is required to update nihil-resources."), file=sys.stderr)
@@ -2011,11 +2024,12 @@ class NihilController:
             print(self.formatter.info(f"git -C {path} submodule update --init --recursive --remote --merge"))
         # --quiet masque le détail par submodule (checkout, progression de fetch) :
         # avec des dizaines de submodules, c'est le principal contributeur de bruit.
-        sub_result = subprocess.run(
-            ["git", "-C", str(path), "submodule", "update", "--init", "--recursive", "--remote", "--merge", "--quiet"],
-            capture_output=True,
-            text=True,
-        )
+        with self._loading("Updating nihil-resources submodules..."):
+            sub_result = subprocess.run(
+                ["git", "-C", str(path), "submodule", "update", "--init", "--recursive", "--remote", "--merge", "--quiet"],
+                capture_output=True,
+                text=True,
+            )
         if sub_result.returncode != 0:
             if quiet:
                 print(self.formatter.warning(
