@@ -10,7 +10,7 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from nihil.config import ensure_filesystem, NihilConfig, NIHIL_HOME
 from nihil.features.browser_ui import (
@@ -198,6 +198,19 @@ class NihilController:
             # Public images remain downloadable without authentication.
             pass
 
+    def _parse_env_args(self, env_args: Optional[List[str]]) -> Optional[Dict[str, str]]:
+        """Convertit une liste de '--env KEY[=VALUE]' en dict. VALUE absente => valeur reprise de l'hôte.
+        Renvoie None (et affiche une erreur) si un KEY est invalide."""
+        environment: Dict[str, str] = {}
+        for item in env_args or []:
+            key, sep, value = item.partition("=")
+            key = key.strip()
+            if not key:
+                print(self.formatter.error(f"Invalid --env value: '{item}' (expected KEY or KEY=VALUE)."), file=sys.stderr)
+                return None
+            environment[key] = value if sep else os.environ.get(key, "")
+        return environment
+
     def _cmd_start(self, args) -> int:
         _NOT_CHECKED = object()
         _update_cache = [_NOT_CHECKED]
@@ -261,6 +274,11 @@ class NihilController:
         container_existed = container is not None
         if container:
             verbose_info(f"Container '{container_name}' found.")
+            if getattr(args, "env", None):
+                print(self.formatter.warning(
+                    f"Container '{container_name}' already exists; --env is ignored. "
+                    f"Recreate it to apply new environment variables, e.g.: nihil remove {container_name} && nihil start {container_name} --env ..."
+                ))
             if getattr(args, "vpn", None) and self._container_uses_host_network(container):
                 print(self.formatter.error(
                     "This existing container uses host networking. VPN is refused because OpenVPN would modify the host network namespace. "
@@ -359,6 +377,9 @@ class NihilController:
             if browser_ui_enabled and browser_ui_password is None:
                 browser_ui_password = secrets.token_urlsafe(12)
                 browser_ui_save_password(container_name, browser_ui_password)
+            environment = self._parse_env_args(getattr(args, "env", None))
+            if environment is None:
+                return 1
             container = self.manager.create_container(
                 name=container_name,
                 image=image,
@@ -376,6 +397,7 @@ class NihilController:
                 browser_ui=browser_ui_enabled,
                 browser_ui_port=browser_ui_port if browser_ui_enabled else None,
                 browser_ui_password=browser_ui_password if browser_ui_enabled else None,
+                environment=environment,
             )
             verbose_info(f"Container '{container_name}' created.")
             verbose_info(f"Starting container '{container_name}'...")

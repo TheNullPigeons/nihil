@@ -115,6 +115,14 @@ Examples:
         default=None,
         help="Start the container with OpenVPN. With FILE, use that .ovpn file; without FILE, use ~/.nihil/vpn/client.ovpn or the only .ovpn in ~/.nihil/vpn.",
     )
+    start_parser.add_argument(
+        "--env",
+        "-e",
+        action="append",
+        metavar="KEY[=VALUE]",
+        default=None,
+        help="Set an environment variable in the container (repeatable). Without VALUE, forwards the value from the host environment.",
+    )
     start_parser.add_argument("--disable-x11", action="store_true", help="Disable X11/XWayland forwarding for this container.")
     start_parser.add_argument("--disable-wayland", action="store_true", help="Disable Wayland socket forwarding for this container.")
     start_parser.add_argument("--no-my-resources", action="store_true", help="Do not mount '~/.nihil/my-resources' into the container.")
