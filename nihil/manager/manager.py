@@ -320,6 +320,7 @@ class NihilManager:
         browser_ui: bool = False,
         browser_ui_port: Optional[int] = None,
         browser_ui_password: Optional[str] = None,
+        environment: Optional[Dict[str, str]] = None,
     ):
         if image is None:
             image = self.DEFAULT_IMAGE
@@ -483,6 +484,15 @@ class NihilManager:
                 host_binding = ("127.0.0.1", browser_ui_port)
                 container_config["ports"] = container_config.get("ports") or {}
                 container_config["ports"][port_key] = host_binding
+        if environment:
+            container_config["environment"] = container_config.get("environment") or {}
+            if isinstance(container_config["environment"], list):
+                container_config["environment"] = dict(
+                    kv.split("=", 1) for kv in container_config["environment"] if "=" in kv
+                )
+            # Fusionné en dernier : les variables passées par l'utilisateur (--env)
+            # ont la priorité sur celles fixées automatiquement par nihil ci-dessus.
+            container_config["environment"].update(environment)
         from nihil.utils.platform_info import get_image_platform
         image_platform = get_image_platform()
         if image_platform:
