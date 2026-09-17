@@ -511,6 +511,25 @@ class NihilManager:
         shutil.copy2(str(xauth_path), dest)
         return True
 
+    def _hosts_backup_path(self, container) -> Path:
+        return NIHIL_HOME / "state" / getattr(container, "name", "<unknown>") / "hosts.tar"
+
+    def _backup_hosts(self, container) -> None:
+        """Sauvegarde /etc/hosts avant un stop, car Docker le régénère à chaque start
+        et écraserait sinon les entrées ajoutées manuellement dans le container."""
+        tar_bytes = self.extract_container_data(container, ["/etc/hosts"]).get("/etc/hosts")
+        if not tar_bytes:
+            return
+        backup_path = self._hosts_backup_path(container)
+        backup_path.parent.mkdir(parents=True, exist_ok=True)
+        backup_path.write_bytes(tar_bytes)
+
+    def _restore_hosts_backup(self, container) -> None:
+        backup_path = self._hosts_backup_path(container)
+        if not backup_path.is_file():
+            return
+        self.restore_container_data(container, {"/etc/hosts": backup_path.read_bytes()})
+
     def start_container(self, container) -> bool:
         env_list = container.attrs.get("Config", {}).get("Env") or []
         env_dict = dict(kv.split("=", 1) for kv in env_list if "=" in kv)
@@ -526,11 +545,13 @@ class NihilManager:
             )
         try:
             container.start()
+            self._restore_hosts_backup(container)
             return True
         except docker.errors.APIError as e:
             raise ContainerStartFailed(name=getattr(container, "name", "<unknown>"), message=f"Erreur start: {e}")
 
     def stop_container(self, container) -> bool:
+        self._backup_hosts(container)
         try:
             container.stop()
             return True
@@ -538,8 +559,11 @@ class NihilManager:
             raise ContainerStopFailed(name=getattr(container, "name", "<unknown>"), message=f"Erreur stop: {e}")
 
     def remove_container(self, container, force: bool = False) -> bool:
+        name = getattr(container, "name", None)
         try:
             container.remove(force=force)
+            if name:
+                shutil.rmtree(NIHIL_HOME / "state" / name, ignore_errors=True)
             return True
         except docker.errors.APIError as e:
             raise ContainerRemoveFailed(name=getattr(container, "name", "<unknown>"), message=f"Erreur remove: {e}")
