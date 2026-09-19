@@ -602,6 +602,22 @@ class NihilController:
             browser_ui_display = f"[green]Enabled[/] (http://127.0.0.1:{browser_ui_port})"
         else:
             browser_ui_display = "[red]Disabled[/]"
+        # Env vars nihil sets internally (VPN, X11/Wayland, browser UI...): not what --env is about.
+        internal_env_keys = {
+            "NIHIL_VPN", "DISPLAY", "NIHIL_X_MODE", "XAUTHORITY",
+            "_JAVA_AWT_WM_NONREPARENTING", "QT_X11_NO_MITSHM",
+            "XDG_RUNTIME_DIR", "WAYLAND_DISPLAY", "NIHIL_WAYLAND",
+            "NIHIL_BROWSER_UI", "NIHIL_BROWSER_UI_PORT", "NIHIL_BROWSER_UI_PASSWORD",
+        }
+        try:
+            image_env_list = container.image.attrs.get("Config", {}).get("Env") or []
+        except Exception:
+            image_env_list = []
+        image_env_keys = {kv.split("=", 1)[0] for kv in image_env_list if "=" in kv}
+        custom_env = {
+            k: v for k, v in env.items()
+            if k not in internal_env_keys and k not in image_env_keys
+        }
         table = Table(show_header=False, box=None, padding=(0, 2))
         table.add_column(style="bold cyan")
         table.add_column(style="white")
@@ -616,6 +632,8 @@ class NihilController:
         table.add_row("X11", x11_display)
         table.add_row("Wayland", wayland_display)
         table.add_row("Browser UI", browser_ui_display)
+        for i, (k, v) in enumerate(sorted(custom_env.items())):
+            table.add_row("Env" if i == 0 else "", f"{k}={v}")
         if browser_ui_flag:
             if browser_ui_session:
                 table.add_row("Session (browser)", f"[green]{browser_ui_session}[/]")
