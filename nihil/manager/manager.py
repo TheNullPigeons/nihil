@@ -568,6 +568,13 @@ class NihilManager:
         except docker.errors.APIError as e:
             raise ContainerRemoveFailed(name=getattr(container, "name", "<unknown>"), message=f"Erreur remove: {e}")
 
+    def get_container_workspace_path(self, container) -> Optional[str]:
+        """Return the host path bind-mounted as /workspace in this container, if any."""
+        for mount in container.attrs.get("Mounts") or []:
+            if mount.get("Type") == "bind" and mount.get("Destination") == "/workspace":
+                return mount.get("Source")
+        return None
+
     def get_used_browser_ui_ports(self) -> Set[int]:
         used: Set[int] = set()
         for c in self.list_containers(all=True):

@@ -691,6 +691,7 @@ class NihilController:
                 print("No container selected.")
                 return 0
             container_names = selected_containers
+        wipe = getattr(args, "wipe", False)
         errors = 0
         for container_name in container_names:
             container = self.manager.get_container(container_name)
@@ -698,6 +699,7 @@ class NihilController:
                 print(self.formatter.error(f"Container '{container_name}' doesn't exist."), file=sys.stderr)
                 errors += 1
                 continue
+            workspace_path = self.manager.get_container_workspace_path(container) if wipe else None
             if container.status == "running":
                 print(self.formatter.info(f"Stopping container '{container_name}'..."))
                 self.manager.stop_container(container)
@@ -705,7 +707,40 @@ class NihilController:
             self.manager.remove_container(container, force=args.force)
             browser_ui_clear_password(container_name)
             print(self.formatter.success(f"Container '{container_name}' removed successfully."))
+            if wipe:
+                self._wipe_workspace(container_name, workspace_path, skip_confirm=args.force)
         return 1 if errors > 0 else 0
+
+    def _wipe_workspace(self, container_name: str, workspace_path: Optional[str], skip_confirm: bool) -> None:
+        """Permanently delete a container's /workspace directory on the host, once it has been removed."""
+        import shutil
+
+        if not workspace_path:
+            print(self.formatter.info(f"No /workspace mount found for '{container_name}'; nothing to wipe."))
+            return
+        path = Path(workspace_path)
+        if not path.exists():
+            print(self.formatter.info(f"Workspace already gone: {path}"))
+            return
+        if not skip_confirm:
+            try:
+                from rich.prompt import Confirm
+                if not Confirm.ask(f"Permanently delete workspace '{path}' and everything in it?", default=False):
+                    print(self.formatter.info(f"Workspace kept: {path}"))
+                    return
+            except ImportError:
+                pass
+        try:
+            shutil.rmtree(path)
+            print(self.formatter.success(f"Workspace wiped: {path}"))
+        except PermissionError:
+            print(self.formatter.warning(
+                f"Could not wipe workspace '{path}': permission denied "
+                f"(some files are likely owned by root from inside the container). "
+                f"Try: sudo rm -rf {shlex.quote(str(path))}"
+            ))
+        except OSError as e:
+            print(self.formatter.warning(f"Could not wipe workspace '{path}': {e}"))
 
     def _cmd_exec(self, args) -> int:
         container_name = args.name
