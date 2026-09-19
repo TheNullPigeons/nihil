@@ -140,6 +140,7 @@ Examples:
     remove_parser = subparsers.add_parser("remove", help="Remove one or more containers")
     remove_parser.add_argument("names", nargs="*", help="Container name(s)")
     remove_parser.add_argument("--force", "-f", action="store_true", help="Force removal")
+    remove_parser.add_argument("--wipe", action="store_true", help="Also permanently delete each container's /workspace directory on the host (asks for confirmation unless --force is also set)")
 
     install_parser = subparsers.add_parser("install", help="Install or update nihil images")
     install_parser.add_argument("image", nargs="?", default=None, metavar="VARIANT", help="Image variant to install (full|ad|web|blueteam). If not specified, prompted to select.")
