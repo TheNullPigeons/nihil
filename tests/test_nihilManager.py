@@ -247,6 +247,35 @@ class TestNihilManager:
                 call_args = mock_docker_client.containers.create.call_args
                 assert call_args.kwargs["network_mode"] == "host"
 
+    def test_create_container_browser_ui_binds_loopback_on_host_network(self, mock_docker_client):
+        """--network host shares the host's namespace: the in-container noVNC proxy must
+        bind to loopback there, or it is reachable from the whole LAN, not just localhost."""
+        mock_docker_client.containers.create.return_value = MagicMock()
+        mock_docker_client.images.get.return_value = MagicMock()
+
+        with patch('nihil.manager.manager.docker.from_env', return_value=mock_docker_client):
+            with patch('nihil.manager.manager.ensure_filesystem'):
+                manager = NihilManager()
+                manager.create_container("bui-host", network_mode="host", browser_ui=True, browser_ui_port=6901)
+
+        environment = mock_docker_client.containers.create.call_args.kwargs["environment"]
+        assert environment["NIHIL_BROWSER_UI_BIND"] == "127.0.0.1"
+
+    def test_create_container_browser_ui_binds_all_interfaces_on_bridge_network(self, mock_docker_client):
+        """In bridge mode, Docker's own port publishing (below) restricts the host side to
+        127.0.0.1; the in-container proxy must stay on every interface for that NAT to work."""
+        mock_docker_client.containers.create.return_value = MagicMock()
+        mock_docker_client.images.get.return_value = MagicMock()
+
+        with patch('nihil.manager.manager.docker.from_env', return_value=mock_docker_client):
+            with patch('nihil.manager.manager.ensure_filesystem'):
+                manager = NihilManager()
+                manager.create_container("bui-bridge", network_mode="bridge", browser_ui=True, browser_ui_port=6901)
+
+        call_args = mock_docker_client.containers.create.call_args
+        assert call_args.kwargs["environment"]["NIHIL_BROWSER_UI_BIND"] == "0.0.0.0"
+        assert call_args.kwargs["ports"]["6901/tcp"] == ("127.0.0.1", 6901)
+
     def test_create_container_with_vpn(self, mock_docker_client, tmp_path):
         """Test création de container avec OpenVPN."""
         vpn_file = tmp_path / "client.ovpn"
