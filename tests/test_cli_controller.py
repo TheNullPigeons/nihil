@@ -309,3 +309,41 @@ class TestUninstallUnused:
         args = create_parser().parse_args(["uninstall", "--unused"])
         assert args.unused is True
         assert args.names == []
+
+
+class TestResolveDisplayForwarding:
+    """Browser UI must never share the host's real X11/Wayland display: it runs its
+    own isolated desktop, and forwarding the host socket into the same container
+    would let it affect the host's actual desktop (e.g. set its wallpaper)."""
+
+    def test_no_browser_ui_leaves_forwarding_untouched(self):
+        from nihil.cli.controller import NihilController
+        x11, wayland, messages = NihilController._resolve_display_forwarding(True, True, False)
+        assert (x11, wayland) == (True, True)
+        assert messages == []
+
+    def test_browser_ui_disables_x11(self):
+        from nihil.cli.controller import NihilController
+        x11, wayland, messages = NihilController._resolve_display_forwarding(True, False, True)
+        assert (x11, wayland) == (False, False)
+        assert len(messages) == 1
+        assert "X11" in messages[0]
+
+    def test_browser_ui_disables_wayland(self):
+        from nihil.cli.controller import NihilController
+        x11, wayland, messages = NihilController._resolve_display_forwarding(False, True, True)
+        assert (x11, wayland) == (False, False)
+        assert len(messages) == 1
+        assert "Wayland" in messages[0]
+
+    def test_browser_ui_disables_both_with_two_messages(self):
+        from nihil.cli.controller import NihilController
+        x11, wayland, messages = NihilController._resolve_display_forwarding(True, True, True)
+        assert (x11, wayland) == (False, False)
+        assert len(messages) == 2
+
+    def test_browser_ui_with_nothing_to_disable_emits_no_message(self):
+        from nihil.cli.controller import NihilController
+        x11, wayland, messages = NihilController._resolve_display_forwarding(False, False, True)
+        assert (x11, wayland) == (False, False)
+        assert messages == []
