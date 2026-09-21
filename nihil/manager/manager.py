@@ -474,6 +474,15 @@ class NihilManager:
                 )
             container_config["environment"]["NIHIL_BROWSER_UI"] = "1"
             container_config["environment"]["NIHIL_BROWSER_UI_PORT"] = str(browser_ui_port)
+            # In "host" network mode the container shares the host's network namespace
+            # directly, so whatever address the in-container noVNC proxy binds to is the
+            # address it binds to *on the host* too: restrict it to loopback there. In
+            # bridge mode, Docker's own port publishing already restricts the host side to
+            # 127.0.0.1 (below), and the proxy must stay reachable on the container's own
+            # interface for that NAT to work, so it keeps listening on every interface.
+            container_config["environment"]["NIHIL_BROWSER_UI_BIND"] = (
+                "127.0.0.1" if network_mode == "host" else "0.0.0.0"
+            )
             # Keep Java/Qt GUI applications compatible with the browser desktop.
             container_config["environment"]["_JAVA_AWT_WM_NONREPARENTING"] = "1"
             container_config["environment"]["QT_X11_NO_MITSHM"] = "1"
