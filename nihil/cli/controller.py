@@ -218,6 +218,29 @@ class NihilController:
             environment[key] = value if sep else os.environ.get(key, "")
         return environment
 
+    @staticmethod
+    def _resolve_display_forwarding(enable_x11: bool, enable_wayland: bool, browser_ui_enabled: bool):
+        """Browser UI runs its own isolated desktop inside the container (noVNC).
+        Also forwarding the host's X11/Wayland socket into that same container would
+        let anything running on that desktop (a wallpaper setter, for instance) reach
+        the host's real display and affect it directly, so the two are mutually
+        exclusive. Returns (enable_x11, enable_wayland, info_messages)."""
+        messages: List[str] = []
+        if browser_ui_enabled:
+            if enable_x11:
+                messages.append(
+                    "Browser UI enabled: disabling host X11 forwarding for this container "
+                    "(it would otherwise share your real desktop instead of its own isolated one)."
+                )
+                enable_x11 = False
+            if enable_wayland:
+                messages.append(
+                    "Browser UI enabled: disabling host Wayland forwarding for this container "
+                    "(it would otherwise share your real desktop instead of its own isolated one)."
+                )
+                enable_wayland = False
+        return enable_x11, enable_wayland, messages
+
     def _cmd_start(self, args) -> int:
         _NOT_CHECKED = object()
         _update_cache = [_NOT_CHECKED]
@@ -376,6 +399,13 @@ class NihilController:
             if workspace_path is not None:
                 workspace_path = str(Path(workspace_path).expanduser().resolve())
             browser_ui_enabled = getattr(args, "browser_ui", False)
+            enable_x11, enable_wayland, display_messages = self._resolve_display_forwarding(
+                enable_x11, enable_wayland, browser_ui_enabled
+            )
+            for message in display_messages:
+                print(self.formatter.info(message))
+            args.enable_x11 = enable_x11
+            args.enable_wayland = enable_wayland
             browser_ui_port = getattr(args, "browser_ui_port", None)
             if browser_ui_port is not None and not (1 <= browser_ui_port <= 65535):
                 print(self.formatter.error(f"Invalid port: {browser_ui_port}. Must be between 1 and 65535."), file=sys.stderr)
