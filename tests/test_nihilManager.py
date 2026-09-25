@@ -340,6 +340,62 @@ class TestNihilManager:
         config = mock_docker_client.containers.create.call_args.kwargs
         assert config["network_mode"] == "bridge"
 
+    def test_refresh_display_forwarding_removes_legacy_display_mounts(self, mock_docker_client):
+        """An upgrade must discard stale X11/Wayland state while preserving other mounts."""
+        snapshot = {
+            "volumes": {
+                "/workspace": {"bind": "/workspace", "mode": "rw"},
+                "/tmp/.X11-unix": {"bind": "/tmp/.X11-unix", "mode": "rw"},
+                "/run/user/999/wayland-0": {"bind": "/run/user/999/wayland-0", "mode": "rw"},
+            },
+            "environment": {
+                "DISPLAY": ":0",
+                "NIHIL_X_MODE": "xwayland",
+                "XDG_RUNTIME_DIR": "/run/user/999",
+                "WAYLAND_DISPLAY": "wayland-0",
+                "NIHIL_WAYLAND": "1",
+                "CUSTOM_VALUE": "keep",
+            },
+        }
+
+        with patch('nihil.manager.manager.docker.from_env', return_value=mock_docker_client):
+            with patch('nihil.manager.manager.ensure_filesystem'):
+                manager = NihilManager()
+                changed = manager.refresh_display_forwarding(
+                    snapshot, enable_x11=False, enable_wayland=False
+                )
+
+        assert changed is True
+        assert snapshot["volumes"] == {"/workspace": {"bind": "/workspace", "mode": "rw"}}
+        assert snapshot["environment"] == {"CUSTOM_VALUE": "keep"}
+
+    def test_refresh_display_forwarding_adds_current_wayland_socket(self, mock_docker_client, tmp_path, monkeypatch):
+        """An upgrade receives the current Wayland socket rather than an old one."""
+        wayland_socket = tmp_path / "wayland-1"
+        wayland_socket.touch()
+        monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+        monkeypatch.setenv("WAYLAND_DISPLAY", "wayland-1")
+        monkeypatch.delenv("DISPLAY", raising=False)
+        snapshot = {"volumes": {}, "environment": {}}
+
+        with patch('nihil.manager.manager.docker.from_env', return_value=mock_docker_client):
+            with patch('nihil.manager.manager.ensure_filesystem'):
+                with patch('nihil.manager.manager.os.getuid', return_value=1000):
+                    manager = NihilManager()
+                    changed = manager.refresh_display_forwarding(
+                        snapshot, enable_x11=False, enable_wayland=True
+                    )
+
+        assert changed is True
+        assert snapshot["volumes"][str(wayland_socket)] == {
+            "bind": "/run/user/1000/wayland-1", "mode": "rw"
+        }
+        assert snapshot["environment"] == {
+            "XDG_RUNTIME_DIR": "/run/user/1000",
+            "WAYLAND_DISPLAY": "wayland-1",
+            "NIHIL_WAYLAND": "1",
+        }
+
     def test_create_container_fails(self, mock_docker_client):
         """Test création de container échoue"""
         mock_docker_client.images.get.return_value = MagicMock()
