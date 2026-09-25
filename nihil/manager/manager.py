@@ -926,6 +926,97 @@ class NihilManager:
             "hostname": config.get("Hostname") or container.name,
         }
 
+    def refresh_display_forwarding(
+        self,
+        snapshot: Dict,
+        *,
+        enable_x11: bool,
+        enable_wayland: bool,
+    ) -> bool:
+        """Apply the host's current display forwarding settings to an upgrade snapshot.
+
+        Display sockets are ephemeral host resources.  Keeping their old bind mounts
+        during an upgrade means containers created before Wayland support can never
+        receive it.  The remaining volumes and user-provided environment stay intact.
+        """
+        volumes = snapshot.setdefault("volumes", {})
+        environment = snapshot.setdefault("environment", {})
+        if isinstance(environment, list):
+            environment = dict(kv.split("=", 1) for kv in environment if "=" in kv)
+            snapshot["environment"] = environment
+
+        before_volumes = dict(volumes)
+        before_environment = dict(environment)
+        previous_xauthority = environment.get("XAUTHORITY")
+
+        for source, mount in list(volumes.items()):
+            destination = mount.get("bind", "")
+            if destination == "/tmp/.X11-unix" or Path(destination).name.startswith("wayland-"):
+                volumes.pop(source, None)
+        if previous_xauthority:
+            volumes.pop(previous_xauthority, None)
+
+        for key in (
+            "DISPLAY",
+            "NIHIL_X_MODE",
+            "XAUTHORITY",
+            "_JAVA_AWT_WM_NONREPARENTING",
+            "QT_X11_NO_MITSHM",
+            "XDG_RUNTIME_DIR",
+            "WAYLAND_DISPLAY",
+            "NIHIL_WAYLAND",
+        ):
+            environment.pop(key, None)
+
+        from nihil.utils.platform_info import get_host_os, HostOS
+
+        host_os = get_host_os()
+        if enable_x11:
+            if host_os == HostOS.MACOS:
+                environment["DISPLAY"] = "host.docker.internal:0"
+                environment["NIHIL_X_MODE"] = "xquartz"
+            else:
+                display = os.environ.get("DISPLAY")
+                x11_socket = Path("/tmp/.X11-unix")
+                if display and x11_socket.exists():
+                    volumes[str(x11_socket)] = {"bind": "/tmp/.X11-unix", "mode": "rw"}
+                    environment["DISPLAY"] = display
+                    session_type = os.environ.get("XDG_SESSION_TYPE", "").lower()
+                    environment["NIHIL_X_MODE"] = (
+                        "xwayland" if session_type == "wayland" or os.environ.get("WAYLAND_DISPLAY")
+                        else "x11" if session_type == "x11" else "unknown"
+                    )
+                    if shutil.which("xhost"):
+                        subprocess.run(
+                            ["xhost", "+si:localuser:root"],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                        )
+                    else:
+                        xauth_stable = str(NIHIL_HOME / ".xauth")
+                        if self._refresh_xauth(xauth_stable):
+                            volumes[xauth_stable] = {"bind": xauth_stable, "mode": "ro"}
+                            environment["XAUTHORITY"] = xauth_stable
+            environment["_JAVA_AWT_WM_NONREPARENTING"] = "1"
+            environment["QT_X11_NO_MITSHM"] = "1"
+
+        if enable_wayland:
+            wayland_display = os.environ.get("WAYLAND_DISPLAY")
+            xdg_runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+            if wayland_display and xdg_runtime_dir:
+                wayland_socket = Path(xdg_runtime_dir) / wayland_display
+                if wayland_socket.exists():
+                    container_runtime_dir = f"/run/user/{os.getuid()}"
+                    volumes[str(wayland_socket)] = {
+                        "bind": f"{container_runtime_dir}/{wayland_display}",
+                        "mode": "rw",
+                    }
+                    environment["XDG_RUNTIME_DIR"] = container_runtime_dir
+                    environment["WAYLAND_DISPLAY"] = wayland_display
+                    environment["NIHIL_WAYLAND"] = "1"
+
+        return volumes != before_volumes or environment != before_environment
+
     def recreate_container(self, snapshot: Dict):
         """Recrée un container à partir d'un snapshot de configuration."""
         container_config = {

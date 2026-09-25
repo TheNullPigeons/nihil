@@ -1004,6 +1004,22 @@ class NihilController:
             current_image_tag = snapshot["image"]
             config_changes: List[str] = []
 
+            browser_ui_enabled = snapshot.get("environment", {}).get("NIHIL_BROWSER_UI") == "1"
+            enable_x11, enable_wayland, _ = self._resolve_display_forwarding(
+                self.config.x11_by_default,
+                self.config.wayland_by_default,
+                browser_ui_enabled,
+            )
+            if self.manager.refresh_display_forwarding(
+                snapshot,
+                enable_x11=enable_x11,
+                enable_wayland=enable_wayland,
+            ):
+                enabled_displays = ", ".join(
+                    name for name, enabled in (("X11", enable_x11), ("Wayland", enable_wayland)) if enabled
+                ) or "disabled"
+                config_changes.append(f"display forwarding: {enabled_displays}")
+
             if getattr(args, "privileged", False) and not snapshot.get("privileged", False):
                 snapshot["privileged"] = True
                 config_changes.append("privileged: enabled")
