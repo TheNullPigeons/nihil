@@ -23,6 +23,26 @@ class TestMainEntryPoint:
         with patch("sys.argv", ["nihil", "version"]):
             assert main() == 0
 
+    def test_exec_does_not_write_banner_to_command_stdout(self):
+        """Keep redirected command output byte-for-byte clean."""
+        from nihil.cli.controller import NihilController
+        controller = object.__new__(NihilController)
+        parsed = SimpleNamespace(command="exec")
+        controller.parser = MagicMock()
+        controller.parser.parse_args.return_value = parsed
+        controller.formatter = MagicMock()
+        controller.config = SimpleNamespace(image_source_active="upstream")
+        controller._configure_image_registry = MagicMock()
+        controller._cmd_exec = MagicMock(return_value=0)
+
+        with (
+            patch("nihil.cli.controller.NihilManager", return_value=MagicMock()),
+            patch("nihil.cli.controller.print_compact_banner") as banner,
+        ):
+            assert controller.run(["exec", "harness", "--", "true"]) == 0
+
+        banner.assert_not_called()
+
 
 class TestStartShellCommand:
     """Tests pour le shell interactif lance par `nihil start`."""

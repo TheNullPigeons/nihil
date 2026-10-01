@@ -3,6 +3,7 @@
 """Tests unitaires pour nihilManager.py"""
 
 import pytest
+from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, patch, call
 import docker.errors
 
@@ -37,6 +38,43 @@ class TestNihilManager:
             with patch('nihil.manager.manager.ensure_filesystem'):
                 with pytest.raises(DockerUnavailable):
                     NihilManager()
+
+    @pytest.mark.parametrize(("is_tty", "expected_mode"), [(True, "-it"), (False, "-i")])
+    def test_exec_in_container_adapts_to_terminal(self, is_tty, expected_mode):
+        """Use a TTY only when both standard streams provide one."""
+        manager = object.__new__(NihilManager)
+        stdin = MagicMock()
+        stdout = MagicMock()
+        stdin.isatty.return_value = is_tty
+        stdout.isatty.return_value = is_tty
+
+        with (
+            patch("nihil.manager.manager.sys.stdin", stdin),
+            patch("nihil.manager.manager.sys.stdout", stdout),
+            patch("nihil.manager.manager.subprocess.run") as run,
+            patch("signal.signal"),
+        ):
+            manager.exec_in_container(SimpleNamespace(id="container-id"), "nmap -V")
+
+        run.assert_called_once_with(
+            ["docker", "exec", expected_mode, "container-id", "nmap", "-V"]
+        )
+
+    def test_exec_in_container_preserves_argument_boundaries(self):
+        """Pass quoted scripts to Docker without joining and reparsing them."""
+        manager = object.__new__(NihilManager)
+        command = ["bash", "-c", "for item in 1 2; do echo \"$item -> ok\"; done"]
+
+        with (
+            patch("nihil.manager.manager.sys.stdin.isatty", return_value=False),
+            patch("nihil.manager.manager.subprocess.run") as run,
+            patch("signal.signal"),
+        ):
+            manager.exec_in_container(SimpleNamespace(id="container-id"), command)
+
+        run.assert_called_once_with(
+            ["docker", "exec", "-i", "container-id", *command]
+        )
     
     def test_ensure_image_exists_image_found(self, mock_docker_client):
         """Test ensure_image_exists quand l'image existe déjà"""
