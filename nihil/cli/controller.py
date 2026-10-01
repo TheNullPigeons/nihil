@@ -121,7 +121,7 @@ class NihilController:
         parsed_args = self.parser.parse_args(args)
         should_show_banner = (
             parsed_args.command is not None and
-            parsed_args.command not in ["version", "completion", "config"] and
+            parsed_args.command not in ["version", "completion", "config", "exec"] and
             not (parsed_args.command == "start" and not getattr(parsed_args, "verbose", False))
         )
         if should_show_banner:
@@ -805,7 +805,7 @@ class NihilController:
         if container.status != "running":
             print(self.formatter.error(f"Container '{container_name}' is not running."), file=sys.stderr)
             return 1
-        command = " ".join(args.exec_command) if args.exec_command else "zsh"
+        command = args.exec_command or ["zsh"]
         self.manager.exec_in_container(container, command)
         return 0
 
