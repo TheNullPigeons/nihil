@@ -2,6 +2,7 @@ from pathlib import Path
 import json
 import pytest
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 from nihil.cli.parser import create_parser
 from nihil.features.image_sources import ImageSourceError, ImageSourceManager
@@ -32,6 +33,10 @@ def test_image_commands_are_available():
     switch = parser.parse_args(["image", "switch", "personal"])
     assert switch.image_action == "switch"
     assert switch.source == "personal"
+
+    channel = parser.parse_args(["image", "channel", "dev"])
+    assert channel.image_action == "channel"
+    assert channel.channel == "dev"
 
     build = parser.parse_args(["image", "build", "web", "--wait"])
     assert build.image_action == "build"
@@ -283,6 +288,50 @@ def test_personal_source_uses_latest_without_a_custom_branch():
     NihilController._configure_image_registry(controller)
 
     assert controller.manager.AVAILABLE_IMAGES["full"] == "ghcr.io/alice/full:latest"
+
+
+def test_upstream_channel_selects_dev_without_changing_personal_images():
+    from nihil.cli.controller import NihilController
+    from nihil.config.user_config import NihilConfig
+
+    config = NihilConfig.__new__(NihilConfig)
+    config._data = {"image_sources": {"active": "upstream", "channel": "dev"}}
+    controller = NihilController.__new__(NihilController)
+    controller.config = config
+    controller.manager = SimpleNamespace()
+    controller._configure_image_registry()
+    assert controller.manager.AVAILABLE_IMAGES["full"] == "ghcr.io/thenullpigeons/full:dev"
+    assert controller.manager.DEFAULT_IMAGE == "ghcr.io/thenullpigeons/full:dev"
+
+    config._data["image_sources"]["active"] = "personal"
+    config._data["image_sources"]["personal_repo"] = "Alice/nihil-images"
+    config._data["image_sources"]["personal_branch"] = "nihil/web-custom"
+    controller._configure_image_registry()
+    assert controller.manager.AVAILABLE_IMAGES["web"] == "ghcr.io/alice/web:nihil-web-custom"
+
+
+def test_update_pulls_dev_after_switching_from_an_installed_main_image():
+    from nihil.cli.controller import NihilController
+
+    controller = NihilController.__new__(NihilController)
+    controller.formatter = MagicMock()
+    image = SimpleNamespace(tags=["ghcr.io/thenullpigeons/full:latest"])
+    dev_image = SimpleNamespace(short_id="sha256:1234")
+    docker_images = MagicMock()
+    docker_images.get.side_effect = [LookupError("dev not installed"), dev_image]
+    controller.manager = SimpleNamespace(
+        AVAILABLE_IMAGES={"full": "ghcr.io/thenullpigeons/full:dev"},
+        list_images=lambda: [image],
+        _variant_for_image_tag=lambda tag: "full",
+        image_source=lambda tag: "upstream",
+        client=SimpleNamespace(images=docker_images),
+        _pull_with_progress=MagicMock(),
+        get_image_version=lambda img: "dev",
+        get_image_display_version=lambda img: "dev @1234",
+    )
+
+    assert controller._cmd_update(SimpleNamespace(image=None)) == 0
+    controller.manager._pull_with_progress.assert_called_once_with("ghcr.io/thenullpigeons/full:dev")
 
 
 @pytest.mark.parametrize("active", ["upstream", "personal"])
