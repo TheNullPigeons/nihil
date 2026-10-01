@@ -45,6 +45,8 @@ Examples:
   nihil image build --wait             Trigger builds for all image variants and wait
   nihil image switch upstream          Use the upstream nihil-images source
   nihil image switch personal          Use the personal fork source
+  nihil image channel dev              Pull upstream development images
+  nihil image channel main             Return to stable upstream images
 
         """
     )
@@ -56,7 +58,7 @@ Examples:
 
     subparsers.add_parser("images", help="List available and local image variants")
 
-    image_parser = subparsers.add_parser("image", help="Manage custom nihil-images sources")
+    image_parser = subparsers.add_parser("image", help="Manage nihil-images sources and channels")
     image_subparsers = image_parser.add_subparsers(dest="image_action", metavar="ACTION")
     customize_parser = image_subparsers.add_parser(
         "customize", help="Select tools for a personal nihil-images branch"
@@ -83,6 +85,8 @@ Examples:
     )
     switch_parser = image_subparsers.add_parser("switch", help="Switch the active image source")
     switch_parser.add_argument("source", choices=["upstream", "personal"])
+    channel_parser = image_subparsers.add_parser("channel", help="Select upstream image channel")
+    channel_parser.add_argument("channel", choices=["main", "dev"], nargs="?", help="Channel to use (omit to show current channel)")
     image_subparsers.add_parser("status", help="Show configured upstream and personal image sources")
     build_image_parser = image_subparsers.add_parser(
         "build", help="Trigger Docker builds on the active personal image branch"
