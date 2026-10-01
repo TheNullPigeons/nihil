@@ -179,6 +179,12 @@ class NihilController:
         """Point short image references to the currently active fork."""
         self.manager.personal_image_repo = self.config.personal_image_repo
         if self.config.image_source_active != "personal" or not self.config.personal_image_repo:
+            tag = "dev" if self.config.image_channel == "dev" else "latest"
+            self.manager.AVAILABLE_IMAGES = {
+                variant: f"ghcr.io/thenullpigeons/{variant}:{tag}"
+                for variant in ("full", "ad", "web", "blueteam")
+            }
+            self.manager.DEFAULT_IMAGE = self.manager.AVAILABLE_IMAGES["full"]
             return
         owner = self.config.personal_image_repo.split("/", 1)[0].lower()
         branch = getattr(self.config, "personal_image_branch", "")
@@ -813,13 +819,14 @@ class NihilController:
             if not installed:
                 print(self.formatter.warning("No nihil images installed locally. Use 'nihil install' first."))
                 return 0
-            reverse_map = {v: k for k, v in self.manager.AVAILABLE_IMAGES.items()}
             variants_to_update = []
             for img in installed:
                 for tag in img.tags:
-                    if tag in reverse_map:
-                        variants_to_update.append(reverse_map[tag])
+                    variant = self.manager._variant_for_image_tag(tag)
+                    if variant in self.manager.AVAILABLE_IMAGES and self.manager.image_source(tag) in {"upstream", "personal"}:
+                        variants_to_update.append(variant)
                         break
+            variants_to_update = list(dict.fromkeys(variants_to_update))
             if not variants_to_update:
                 print(self.formatter.warning("No updatable nihil images found."))
                 return 0
@@ -1376,11 +1383,10 @@ class NihilController:
         return 1 if errors > 0 else 0
 
     def _cmd_tools(self, args) -> int:
-        from nihil.features.images import AVAILABLE_IMAGES
         image_key = args.image or "full"
         if image_key == "active-directory":
             image_key = "ad"
-        image_tag = AVAILABLE_IMAGES.get(image_key)
+        image_tag = self.manager.AVAILABLE_IMAGES.get(image_key)
         if not image_tag:
             print(self.formatter.error(f"Unknown image variant: {image_key}"), file=sys.stderr)
             return 1
@@ -1704,11 +1710,21 @@ class NihilController:
         if action == "status":
             print(self.formatter.section_header("NIHIL IMAGE SOURCES"))
             print(f"Active source:     {self.formatter.image_source(self.config.image_source_active)}")
+            print(f"Upstream channel:  {self.config.image_channel}")
             print(f"Upstream repo:     {manager.upstream_repo}")
             print(f"Upstream path:     {self.config.image_sources_upstream_path}")
             print(f"Personal path:     {self.config.personal_image_path or '-'}")
             print(f"Personal repo:     {self.config.personal_image_repo or '-'}")
             print(f"Personal branch:   {self.config.personal_image_branch or '-'}")
+            return 0
+
+        if action == "channel":
+            if args.channel:
+                self.config.set_image_channel(args.channel)
+                print(self.formatter.success(f"Upstream image channel: {args.channel}"))
+                print(self.formatter.info("Use 'nihil update' to pull images from this channel."))
+            else:
+                print(self.formatter.info(f"Upstream image channel: {self.config.image_channel}"))
             return 0
 
         try:

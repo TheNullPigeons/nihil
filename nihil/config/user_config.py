@@ -49,6 +49,7 @@ _DEFAULT_CONFIG: dict = {
     "image_sources": {
         "home": str(NIHIL_HOME / "image-sources"),
         "active": "upstream",
+        "channel": "main",
         "upstream_repo": "TheNullPigeons/nihil-images",
         "upstream_path": str(NIHIL_HOME / "image-sources" / "upstream" / "nihil-images"),
         "personal_path": None,
@@ -76,6 +77,7 @@ _CONFIG_COMMENT = """\
 # updates.auto_check          : check for image updates on start
 # build.images_path           : path to nihil-images source directory (for nihil build)
 # image_sources.active         : upstream | personal
+# image_sources.channel        : main | dev (upstream images)
 # image_sources.personal_repo  : GitHub fork used for customized images
 # image_sources.personal_branch: branch used for customized images
 
@@ -240,6 +242,17 @@ class NihilConfig:
     @property
     def image_source_active(self) -> str:
         return self._get("image_sources", "active") or "upstream"
+
+    @property
+    def image_channel(self) -> str:
+        channel = self._get("image_sources", "channel")
+        return channel if channel in ("main", "dev") else "main"
+
+    def set_image_channel(self, channel: str) -> None:
+        if channel not in ("main", "dev"):
+            raise ValueError(f"Unknown image channel: {channel}")
+        self._data.setdefault("image_sources", {})["channel"] = channel
+        self.save()
 
     @property
     def image_sources_upstream_path(self) -> Path:
