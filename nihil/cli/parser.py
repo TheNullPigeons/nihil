@@ -32,6 +32,8 @@ Examples:
   nihil upgrade                        Upgrade all nihil containers (interactive)
   nihil upgrade pentest                Upgrade a specific container
   nihil upgrade pentest blueteam        Upgrade multiple containers
+  nihil profile create redteam         Create a profile interactively
+  nihil start pentest --profile redteam
   nihil resources install              Clone the shared nihil-resources catalog
   nihil resources update               git pull the local nihil-resources catalog
   nihil resources sync                 Fetch tools listed in catalog/resources.toml
@@ -106,12 +108,15 @@ Examples:
     start_parser = subparsers.add_parser("start", help="Start a container (creates it if it doesn't exist)")
     start_parser.add_argument("name", help="Container name")
     start_parser.add_argument("--verbose", "-v", action="store_true", help="Show detailed startup steps and container information")
-    start_parser.add_argument("--privileged", action="store_true", help="Privileged mode")
+    start_privilege = start_parser.add_mutually_exclusive_group()
+    start_privilege.add_argument("--privileged", dest="privileged", action="store_true", default=None, help="Privileged mode")
+    start_privilege.add_argument("--standard", dest="privileged", action="store_false", help="Disable privileged mode, including when enabled by a profile")
     start_parser.add_argument("--network", choices=["docker", "host", "disabled", "nat"], default=None, help="Network mode (default: from config, fallback: host)")
     start_parser.add_argument("--image", default=None, metavar="VARIANT", help="Image variant to use (full|ad|web|blueteam or nihil/<variant>:local). If not specified, you will be prompted to select one.")
     start_parser.add_argument("--workspace", "-w", help="Workspace path to mount")
     start_parser.add_argument("--workspace-here", action="store_true", help="Mount the current working directory as /workspace inside the container.")
-    start_parser.add_argument(
+    start_vpn = start_parser.add_mutually_exclusive_group()
+    start_vpn.add_argument(
         "--vpn",
         nargs="?",
         const=True,
@@ -119,6 +124,7 @@ Examples:
         default=None,
         help="Start the container with OpenVPN. With FILE, use that .ovpn file; without FILE, use ~/.nihil/vpn/client.ovpn or the only .ovpn in ~/.nihil/vpn.",
     )
+    start_vpn.add_argument("--no-vpn", dest="vpn", action="store_false", help="Disable VPN, including when enabled by a profile")
     start_parser.add_argument(
         "--env",
         "-e",
@@ -127,16 +133,55 @@ Examples:
         default=None,
         help="Set an environment variable in the container (repeatable). Without VALUE, forwards the value from the host environment.",
     )
-    start_parser.add_argument("--disable-x11", action="store_true", help="Disable X11/XWayland forwarding for this container.")
-    start_parser.add_argument("--disable-wayland", action="store_true", help="Disable Wayland socket forwarding for this container.")
-    start_parser.add_argument("--no-my-resources", action="store_true", help="Do not mount '~/.nihil/my-resources' into the container.")
-    start_parser.add_argument("--no-nihil-resources", action="store_true", help="Do not mount the shared 'nihil-resources' catalog into the container.")
-    start_parser.add_argument("--browser-ui", action="store_true", help="Expose a browser-based UI (noVNC) for this session.")
+    start_x11 = start_parser.add_mutually_exclusive_group()
+    start_x11.add_argument("--enable-x11", dest="disable_x11", action="store_false", default=None, help="Enable X11/XWayland forwarding, including when disabled by a profile.")
+    start_x11.add_argument("--disable-x11", dest="disable_x11", action="store_true", help="Disable X11/XWayland forwarding for this container.")
+    start_wayland = start_parser.add_mutually_exclusive_group()
+    start_wayland.add_argument("--enable-wayland", dest="disable_wayland", action="store_false", default=None, help="Enable Wayland forwarding, including when disabled by a profile.")
+    start_wayland.add_argument("--disable-wayland", dest="disable_wayland", action="store_true", help="Disable Wayland socket forwarding for this container.")
+    start_my_resources = start_parser.add_mutually_exclusive_group()
+    start_my_resources.add_argument("--my-resources", dest="no_my_resources", action="store_false", default=None, help="Mount '~/.nihil/my-resources', including when disabled by a profile.")
+    start_my_resources.add_argument("--no-my-resources", dest="no_my_resources", action="store_true", help="Do not mount '~/.nihil/my-resources' into the container.")
+    start_nihil_resources = start_parser.add_mutually_exclusive_group()
+    start_nihil_resources.add_argument("--nihil-resources", dest="no_nihil_resources", action="store_false", default=None, help="Mount the shared nihil-resources catalog, including when disabled by a profile.")
+    start_nihil_resources.add_argument("--no-nihil-resources", dest="no_nihil_resources", action="store_true", help="Do not mount the shared 'nihil-resources' catalog into the container.")
+    start_browser_ui = start_parser.add_mutually_exclusive_group()
+    start_browser_ui.add_argument("--browser-ui", dest="browser_ui", action="store_true", default=None, help="Expose a browser-based UI (noVNC) for this session.")
+    start_browser_ui.add_argument("--no-browser-ui", dest="browser_ui", action="store_false", help="Disable the browser UI, including when enabled by a profile.")
     start_parser.add_argument("--browser-ui-port", type=int, default=None, metavar="PORT", help="Port for the browser UI (default: random 6901-6999 if not set).")
     start_parser.add_argument("--browser-ui-password", type=str, default=None, metavar="PASSWORD", help="Password for browser UI session (default: random, shown once when ready).")
-    start_parser.add_argument("--log", "-l", action="store_true", help="Enable shell logging (asciinema)")
-    start_parser.add_argument("--tmux", action="store_true", help="Open the container shell in tmux for this session.")
+    start_log = start_parser.add_mutually_exclusive_group()
+    start_log.add_argument("--log", "-l", dest="log", action="store_true", default=None, help="Enable shell logging (asciinema)")
+    start_log.add_argument("--no-log", dest="log", action="store_false", help="Disable shell logging, including when enabled by a profile")
+    start_tmux = start_parser.add_mutually_exclusive_group()
+    start_tmux.add_argument("--tmux", dest="tmux", action="store_true", default=None, help="Open the container shell in tmux for this session.")
+    start_tmux.add_argument("--no-tmux", dest="tmux", action="store_false", help="Do not use tmux, including when enabled by a profile.")
     start_parser.add_argument("--no-shell", action="store_true", help="Don't open shell after starting")
+    start_parser.add_argument("--profile", "-P", default=None, metavar="NAME", help="Apply a container profile from ~/.nihil/profiles at creation")
+
+    profile_parser = subparsers.add_parser("profile", help="Manage container profiles")
+    profile_subparsers = profile_parser.add_subparsers(dest="profile_action", metavar="ACTION")
+    profile_create = profile_subparsers.add_parser("create", help="Create a container profile")
+    profile_create.add_argument("name", nargs="?", help="Profile name (prompted when omitted)")
+    profile_create.add_argument("--force", "-f", action="store_true", help="Overwrite an existing profile")
+    profile_create.add_argument("--non-interactive", action="store_true", help="Use defaults for omitted options instead of prompting")
+    profile_create.add_argument("--image", default=None, metavar="VARIANT")
+    profile_create.add_argument("--network", choices=["docker", "host", "disabled", "nat"], default=None)
+    profile_create.add_argument("--workspace", "-w", default=None, metavar="PATH")
+    profile_create.add_argument("--privileged", action="store_true", default=None)
+    profile_create.add_argument("--vpn", nargs="?", const=True, default=None, metavar="FILE")
+    profile_create.add_argument("--env", "-e", action="append", default=None, metavar="KEY[=VALUE]")
+    profile_create.add_argument("--disable-x11", action="store_true", default=None)
+    profile_create.add_argument("--disable-wayland", action="store_true", default=None)
+    profile_create.add_argument("--no-my-resources", action="store_true", default=None)
+    profile_create.add_argument("--no-nihil-resources", action="store_true", default=None)
+    profile_create.add_argument("--browser-ui", action="store_true", default=None)
+    profile_create.add_argument("--browser-ui-port", type=int, default=None, metavar="PORT")
+    profile_create.add_argument("--log", "-l", action="store_true", default=None)
+    profile_create.add_argument("--tmux", action="store_true", default=None)
+    profile_subparsers.add_parser("list", help="List container profiles")
+    profile_show = profile_subparsers.add_parser("show", help="Show a container profile")
+    profile_show.add_argument("name", help="Profile name")
 
     stop_parser = subparsers.add_parser("stop", help="Stop one or more containers")
     stop_parser.add_argument("names", nargs="+", help="Container name(s)")

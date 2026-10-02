@@ -42,7 +42,7 @@ class TestCreateParser:
         args = parser.parse_args(["start", "myname"])
         assert args.command == "start"
         assert args.name == "myname"
-        assert args.privileged is False
+        assert args.privileged is None
         assert args.network is None  # None = use config default (fallback: host)
 
     def test_parse_start_with_options(self):
@@ -205,3 +205,16 @@ class TestCreateParser:
         args = parser.parse_args(["completion", "zsh"])
         assert args.command == "completion"
         assert args.shell == "zsh"
+
+    def test_parse_profile_create_and_start(self):
+        parser = create_parser()
+
+        create = parser.parse_args(["profile", "create", "redteam", "--image", "ad"])
+        assert (create.command, create.profile_action, create.name, create.image) == (
+            "profile", "create", "redteam", "ad"
+        )
+
+        start = parser.parse_args(["start", "lab", "--profile", "redteam", "--standard", "--no-log"])
+        assert start.profile == "redteam"
+        assert start.privileged is False
+        assert start.log is False
