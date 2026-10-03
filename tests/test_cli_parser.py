@@ -200,6 +200,12 @@ class TestCreateParser:
         args = parser.parse_args(["images"])
         assert args.command == "images"
 
+    def test_parse_image_list(self):
+        parser = create_parser()
+        args = parser.parse_args(["image", "list"])
+        assert args.command == "image"
+        assert args.image_action == "list"
+
     def test_parse_completion(self):
         parser = create_parser()
         args = parser.parse_args(["completion", "zsh"])

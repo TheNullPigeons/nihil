@@ -38,6 +38,7 @@ Examples:
   nihil resources update               git pull the local nihil-resources catalog
   nihil resources sync                 Fetch tools listed in catalog/resources.toml
   nihil resources status               Show local nihil-resources status
+  nihil image list                    List available and local image variants
   nihil image status                  Show configured image sources
   nihil image customize               Select tools for a personal image branch
   nihil image customize full --git-del
@@ -58,10 +59,12 @@ Examples:
     info_parser = subparsers.add_parser("info", help="Display information about images and containers")
     info_parser.add_argument("--container", "-c", metavar="NAME", help="Show detailed information for a specific container")
 
-    subparsers.add_parser("images", help="List available and local image variants")
+    # Backward-compatible alias; omitted from help in favor of `nihil image list`.
+    subparsers.add_parser("images")
 
-    image_parser = subparsers.add_parser("image", help="Manage nihil-images sources and channels")
+    image_parser = subparsers.add_parser("image", help="Manage image variants, sources and channels")
     image_subparsers = image_parser.add_subparsers(dest="image_action", metavar="ACTION")
+    image_subparsers.add_parser("list", help="List available and local image variants")
     customize_parser = image_subparsers.add_parser(
         "customize", help="Select tools for a personal nihil-images branch"
     )

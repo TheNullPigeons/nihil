@@ -153,7 +153,7 @@ class NihilController:
             return self._cmd_profile(parsed_args)
         if parsed_args.command == "resources":
             return self._cmd_resources(parsed_args)
-        if parsed_args.command == "image":
+        if parsed_args.command == "image" and parsed_args.image_action != "list":
             return self._cmd_image(parsed_args)
         try:
             self.manager = NihilManager()
@@ -163,6 +163,8 @@ class NihilController:
             return e.exit_code
         if parsed_args.command == "info":
             return self._cmd_info(parsed_args)
+        elif parsed_args.command == "image":
+            return self._cmd_image(parsed_args)
         elif parsed_args.command == "images":
             return self._cmd_images()
         elif parsed_args.command == "start":
@@ -1883,6 +1885,9 @@ class NihilController:
             print(f"Personal repo:     {self.config.personal_image_repo or '-'}")
             print(f"Personal branch:   {self.config.personal_image_branch or '-'}")
             return 0
+
+        if action == "list":
+            return self._cmd_images()
 
         if action == "channel":
             if args.channel:
