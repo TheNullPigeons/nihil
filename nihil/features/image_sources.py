@@ -252,6 +252,17 @@ class ImageSourceManager:
         else:
             self._run(["git", "switch", "-c", branch, f"upstream/{default_branch}"], cwd=path)
 
+        try:
+            self._run(["git", "merge", "--no-edit", f"upstream/{default_branch}"], cwd=path)
+        except ImageSourceError as exc:
+            try:
+                self._run(["git", "merge", "--abort"], cwd=path)
+            except ImageSourceError:
+                pass
+            raise ImageSourceError(
+                f"Could not synchronize {branch} with upstream/{default_branch}: {exc}"
+            ) from exc
+
         return path, fork_repo, branch
 
     def activate_personal(self, path: Path, fork_repo: str, branch: str) -> None:

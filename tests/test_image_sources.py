@@ -117,6 +117,7 @@ def test_existing_fork_is_reused_and_custom_branch_is_created(tmp_path):
     assert saved == {}
     assert ["gh", "repo", "fork", "TheNullPigeons/nihil-images", "--clone=false"] not in calls
     assert ["git", "switch", "-c", "nihil/web-custom", "upstream/main"] in calls
+    assert ["git", "merge", "--no-edit", "upstream/main"] in calls
 
 
 def test_existing_remote_custom_branch_is_checked_out_after_local_reset(tmp_path):
