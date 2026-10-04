@@ -76,6 +76,9 @@ Examples:
         "--no-push", action="store_true", help="Prepare the branch locally without committing or pushing"
     )
     customize_parser.add_argument(
+        "--web", action="store_true", help="Select tools in a local browser instead of the terminal UI"
+    )
+    customize_parser.add_argument(
         "--repo", default=None, metavar="REPO",
         help="GitHub repository (owner/repo or URL; default: TheNullPigeons/nihil-images)",
     )

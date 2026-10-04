@@ -1909,8 +1909,9 @@ class NihilController:
                 return self._customize_image(args, manager)
             if action == "build":
                 manager.trigger_build(variant=args.variant or "all", wait=args.wait)
+                state = "completed" if args.wait else "dispatched"
                 print(self.formatter.success(
-                    f"Docker build workflow dispatched for {manager.config.personal_image_repo}:"
+                    f"Docker build workflow {state} for {manager.config.personal_image_repo}:"
                     f"{manager.config.personal_image_branch}"
                 ))
                 print(self.formatter.info("Use 'nihil install <variant>' when the workflow has finished."))
@@ -1927,7 +1928,7 @@ class NihilController:
         import json
         import subprocess
 
-        if not Confirm.ask(
+        if not getattr(args, "web", False) and not Confirm.ask(
             "Create or use your GitHub fork of nihil-images?",
             default=True,
         ):
@@ -2022,6 +2023,60 @@ class NihilController:
         mandatory_names = {tool["name"].lower() for tool in tools if tool["mandatory"]}
         disabled = {name for name in disabled if str(name).lower() not in mandatory_names}
 
+        def save_selection(selected: set[str]) -> int:
+            enabled = sorted(
+                tool["name"] for tool in tools
+                if tool["mandatory"] or tool["name"] not in selected
+            )
+            selection_path.write_text(
+                json.dumps({"version": 2, "enabled_tools": enabled}, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            return len(enabled)
+
+        if getattr(args, "web", False):
+            def apply_and_build(selected: set[str], report, cancel_event) -> None:
+                report(0, 0, "Saving tool selection")
+                save_selection(selected)
+                if args.no_push:
+                    source_manager.activate_personal(path, fork_repo, branch)
+                    report(1, 1, "Customization saved locally")
+                    return
+                report(0, 0, f"Committing and pushing {branch}")
+                subprocess.run(["git", "add", "build/config/tool-selection.json"], cwd=path, check=True)
+                subprocess.run(
+                    ["git", "commit", "-m", f"Customize {args.variant} image tools"],
+                    cwd=path,
+                    check=True,
+                )
+                subprocess.run(["git", "push", "--set-upstream", "origin", branch], cwd=path, check=True)
+                source_manager.activate_personal(path, fork_repo, branch)
+                source_manager.trigger_build(
+                    variant=args.variant, wait=True, progress_callback=report,
+                    cancel_event=cancel_event,
+                )
+
+            try:
+                selected = self._select_tools_web(
+                    tools,
+                    disabled,
+                    title=f"{fork_repo}:{branch}",
+                    on_save=apply_and_build,
+                    action_label="Save locally" if args.no_push else "Apply & build",
+                    can_cancel=not args.no_push,
+                )
+            except (RuntimeError, subprocess.CalledProcessError, ImageSourceError) as exc:
+                print(self.formatter.error(f"Web customization failed: {exc}"), file=sys.stderr)
+                return 1
+            if selected is None:
+                print("Tool selection cancelled.")
+                return 0
+            if args.no_push:
+                print(self.formatter.success(f"Customization saved locally on {branch}"))
+            else:
+                print(self.formatter.success(f"Customization built from {fork_repo}:{branch}"))
+            return 0
+
         while True:
             selected = self._select_tools_tui(tools, disabled, title=f"{fork_repo}:{branch}")
             if selected is None:
@@ -2029,15 +2084,8 @@ class NihilController:
                 return 0
             disabled = selected
 
-            enabled = sorted(
-                tool["name"] for tool in tools
-                if tool["mandatory"] or tool["name"] not in disabled
-            )
-            selection_path.write_text(
-                json.dumps({"version": 2, "enabled_tools": enabled}, indent=2) + "\n",
-                encoding="utf-8",
-            )
-            print(self.formatter.success(f"Saved tool selection: {len(enabled)} enabled"))
+            enabled_count = save_selection(disabled)
+            print(self.formatter.success(f"Saved tool selection: {enabled_count} enabled"))
 
             if args.no_push:
                 source_manager.activate_personal(path, fork_repo, branch)
@@ -2077,6 +2125,18 @@ class NihilController:
         app = ToolSelectorApp(tools, disabled, title)
         app.run()
         return app.return_value
+
+    def _select_tools_web(
+        self, tools: list[dict], disabled: set[str], *, title: str,
+        on_save=None, action_label: str = "Apply selection", can_cancel: bool = False,
+    ) -> set[str] | None:
+        """Run the localhost browser selector and return the disabled tools."""
+        from nihil.features.tool_selector_web import select_tools_web
+
+        return select_tools_web(
+            tools, disabled, title, on_save=on_save, action_label=action_label,
+            can_cancel=can_cancel,
+        )
 
     def _cmd_resources(self, args) -> int:
         from nihil.config import NIHIL_RESOURCES_REPO

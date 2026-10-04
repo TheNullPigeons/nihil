@@ -20,6 +20,26 @@ class ImageSourceError(RuntimeError):
     """Error related to a local image source or GitHub repository."""
 
 
+class BuildCancelled(ImageSourceError):
+    """Raised after a user-requested GitHub Actions cancellation completes."""
+
+    cancelled = True
+
+
+def _workflow_progress(run: dict) -> tuple[int, int, str]:
+    """Return completed steps, total steps and the current GitHub Actions activity."""
+    jobs = run.get("jobs") or []
+    steps = [step for job in jobs for step in (job.get("steps") or [])]
+    completed = sum(step.get("status") == "completed" for step in steps)
+    active = [step.get("name", "Running") for step in steps if step.get("status") == "in_progress"]
+    if not active:
+        active = [job.get("name", "Waiting") for job in jobs if job.get("status") in {"queued", "in_progress"}]
+    label = active[0] if active else ("Build finished" if run.get("status") == "completed" else "Waiting for GitHub runner")
+    if len(active) > 1:
+        label += f" (+{len(active) - 1})"
+    return completed, max(len(steps), 1), label
+
+
 class ImageSourceManager:
     """Prepare the upstream repository and a personal nihil-images fork."""
 
@@ -263,7 +283,10 @@ class ImageSourceManager:
         )
         return path
 
-    def trigger_build(self, *, variant: str = "all", wait: bool = False) -> None:
+    def trigger_build(
+        self, *, variant: str = "all", wait: bool = False,
+        progress_callback=None, cancel_event=None,
+    ) -> None:
         """Trigger the Docker workflow on the active personal branch."""
         if variant not in {"all", "full", "ad", "web", "blueteam"}:
             raise ImageSourceError("Unknown image variant. Choose all, full, ad, web, or blueteam.")
@@ -272,6 +295,8 @@ class ImageSourceManager:
         if not repo or not branch:
             raise ImageSourceError("No personal fork is configured.")
         self._enable_actions(repo)
+        if progress_callback:
+            progress_callback(0, 0, "Dispatching GitHub Actions")
         dispatch_started = datetime.now(timezone.utc)
         self._run([
             "gh", "workflow", "run", "docker-build.yml",
@@ -283,6 +308,8 @@ class ImageSourceManager:
             deadline = time.monotonic() + 30
             earliest_run = dispatch_started - timedelta(seconds=2)
             while time.monotonic() < deadline:
+                if progress_callback:
+                    progress_callback(0, 0, "Waiting for the GitHub workflow")
                 raw_runs = self._run([
                     "gh", "run", "list", "--workflow", "docker-build.yml",
                     "--repo", repo, "--branch", branch, "--limit", "10",
@@ -309,11 +336,72 @@ class ImageSourceManager:
                 raise ImageSourceError(
                     "The workflow was dispatched, but its new run ID could not be found."
                 )
+            self._watch_build(run_id, repo, progress_callback, cancel_event)
+
+    def _watch_build(self, run_id: str, repo: str, progress_callback=None, cancel_event=None) -> None:
+        """Follow a GitHub Actions run with a step-based progress bar."""
+        console = getattr(self.formatter, "console", None)
+        if console is None and progress_callback is None:
             self._run(
                 ["gh", "run", "watch", run_id, "--repo", repo, "--exit-status"],
                 capture=False,
                 timeout=None,
             )
+            return
+
+        def poll(update) -> dict:
+            run = {}
+            cancel_sent = False
+            while run.get("status") != "completed":
+                raw = self._run([
+                    "gh", "run", "view", run_id, "--repo", repo,
+                    "--json", "status,conclusion,jobs,url",
+                ])
+                try:
+                    run = json.loads(raw)
+                except json.JSONDecodeError as exc:
+                    raise ImageSourceError("GitHub returned an invalid workflow status.") from exc
+                completed, total, label = _workflow_progress(run)
+                if cancel_event is not None and cancel_event.is_set() and not cancel_sent:
+                    self._run(["gh", "run", "cancel", run_id, "--repo", repo])
+                    cancel_sent = True
+                    label = "Cancellation requested"
+                update(completed, total, label, run.get("url") or "")
+                if run.get("status") != "completed":
+                    time.sleep(3)
+            return run
+
+        if progress_callback:
+            run = poll(progress_callback)
+        else:
+            from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn, TimeElapsedColumn
+
+            with Progress(
+                SpinnerColumn(), TextColumn("[cyan]{task.description}"), BarColumn(),
+                TaskProgressColumn(), TimeElapsedColumn(), console=console,
+            ) as progress:
+                task = progress.add_task("Waiting for GitHub runner", total=1)
+                run = poll(lambda completed, total, label, url: progress.update(
+                    task, completed=completed, total=total, description=label
+                ))
+
+        url = run.get("url") or f"https://github.com/{repo}/actions/runs/{run_id}"
+        if progress_callback:
+            try:
+                logs = self._run(
+                    ["gh", "run", "view", run_id, "--repo", repo, "--log"],
+                    timeout=None,
+                )
+            except ImageSourceError as exc:
+                logs = f"Logs could not be downloaded: {exc}"
+            completed, total, _ = _workflow_progress(run)
+            progress_callback(completed, total, "Build logs ready", url, logs)
+        if run.get("conclusion") == "cancelled":
+            raise BuildCancelled(f"GitHub Actions build cancelled: {url}")
+        if run.get("conclusion") != "success":
+            raise ImageSourceError(f"GitHub Actions build {run.get('conclusion') or 'failed'}: {url}")
+        if self.formatter:
+            print(self.formatter.info(f"GitHub Actions: {url}"))
 
     def switch(self, source: str) -> Path:
         if source == "personal":
