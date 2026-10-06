@@ -305,6 +305,22 @@ def test_trigger_build_reports_progress_to_web_ui(tmp_path):
     assert updates[-1] == (1, 1, "Build logs ready", "https://github.test/run/42", "complete build log")
 
 
+def test_completed_build_retries_until_logs_are_available(tmp_path, monkeypatch):
+    manager = ImageSourceManager(SimpleNamespace(image_sources_home=tmp_path))
+    logs = iter(["", "complete build log"])
+    updates = []
+
+    def fake_run(command, **kwargs):
+        if "--log" in command:
+            return next(logs)
+        return json.dumps({"status": "completed", "conclusion": "success", "jobs": []})
+
+    manager._run = fake_run
+    monkeypatch.setattr("nihil.features.image_sources.time.sleep", lambda _: None)
+    manager._watch_build("42", "alice/nihil-images", lambda *update: updates.append(update))
+    assert updates[-1][-1] == "complete build log"
+
+
 def test_web_build_can_be_cancelled(tmp_path, monkeypatch):
     from nihil.features.image_sources import BuildCancelled
 

@@ -398,14 +398,24 @@ class ImageSourceManager:
 
         url = run.get("url") or f"https://github.com/{repo}/actions/runs/{run_id}"
         if progress_callback:
-            try:
-                logs = self._run(
-                    ["gh", "run", "view", run_id, "--repo", repo, "--log"],
-                    timeout=None,
-                )
-            except ImageSourceError as exc:
-                logs = f"Logs could not be downloaded: {exc}"
             completed, total, _ = _workflow_progress(run)
+            logs = ""
+            error = None
+            for attempt in range(5):
+                progress_callback(completed, total, "Downloading complete build logs", url)
+                try:
+                    logs = self._run(
+                        ["gh", "run", "view", run_id, "--repo", repo, "--log"],
+                        timeout=None,
+                    )
+                except ImageSourceError as exc:
+                    error = exc
+                if logs.strip():
+                    break
+                if attempt < 4:
+                    time.sleep(2)
+            if not logs:
+                logs = f"Logs could not be downloaded: {error or 'GitHub returned an empty log archive.'}"
             progress_callback(completed, total, "Build logs ready", url, logs)
         if run.get("conclusion") == "cancelled":
             raise BuildCancelled(f"GitHub Actions build cancelled: {url}")
