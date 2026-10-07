@@ -139,7 +139,7 @@ class NihilController:
             return self._cmd_config(parsed_args)
         if parsed_args.command == "resources":
             return self._cmd_resources(parsed_args)
-        if parsed_args.command == "image":
+        if parsed_args.command == "image" and parsed_args.image_action != "list":
             return self._cmd_image(parsed_args)
         try:
             self.manager = NihilManager()
@@ -149,6 +149,8 @@ class NihilController:
             return e.exit_code
         if parsed_args.command == "info":
             return self._cmd_info(parsed_args)
+        elif parsed_args.command == "image":
+            return self._cmd_image(parsed_args)
         elif parsed_args.command == "images":
             return self._cmd_images()
         elif parsed_args.command == "start":
@@ -258,11 +260,18 @@ class NihilController:
 
         container_name = args.name
         verbose = getattr(args, "verbose", False)
-        explicit_network = args.network is not None
 
         def verbose_info(message: str) -> None:
             if verbose:
                 print(self.formatter.info(message))
+
+        verbose_info(f"Looking for container '{container_name}'...")
+        container = self.manager.get_container(container_name)
+        container_existed = container is not None
+        explicit_network = args.network is not None
+        for field in ("privileged", "browser_ui", "tmux"):
+            if getattr(args, field, None) is None:
+                setattr(args, field, False)
 
         # Appliquer les defaults de config pour les options non spécifiées par l'utilisateur
         if args.network is None:
@@ -277,18 +286,18 @@ class NihilController:
                 "Host networking is not supported on this platform. Switching to 'docker' network mode."
             ))
             args.network = "docker"
-        enable_x11 = self.config.x11_by_default and not getattr(args, "disable_x11", False)
-        enable_wayland = self.config.wayland_by_default and not getattr(args, "disable_wayland", False)
+        enable_x11 = self.config.x11_by_default if args.disable_x11 is None else not args.disable_x11
+        enable_wayland = self.config.wayland_by_default if args.disable_wayland is None else not args.disable_wayland
         args.enable_x11 = enable_x11
         args.enable_wayland = enable_wayland
         if _host_os == HostOS.MACOS and enable_x11:
             print(self.formatter.info(
                 "macOS detected: using XQuartz for X11. Make sure XQuartz is running and run 'xhost +localhost' on your host."
             ))
-        if not args.no_my_resources and not self.config.my_resources_enabled:
-            args.no_my_resources = True
-        if not getattr(args, "no_nihil_resources", False) and not self.config.nihil_resources_enabled:
-            args.no_nihil_resources = True
+        if args.no_my_resources is None:
+            args.no_my_resources = not self.config.my_resources_enabled
+        if args.no_nihil_resources is None:
+            args.no_nihil_resources = not self.config.nihil_resources_enabled
         if not getattr(args, "no_nihil_resources", False):
             nr_path = self.config.nihil_resources_path
             if not nr_path.exists():
@@ -301,19 +310,16 @@ class NihilController:
                     args.no_nihil_resources = True
             elif self.config.nihil_resources_auto_update:
                 self._nihil_resources_pull(nr_path, quiet=True)
-        if not args.log and self.config.logging_always_enable:
-            args.log = True
+        if args.log is None:
+            args.log = self.config.logging_always_enable
         if args.workspace is None and not args.workspace_here and self.config.default_workspace:
             args.workspace = str(self.config.default_workspace)
-        verbose_info(f"Looking for container '{container_name}'...")
-        container = self.manager.get_container(container_name)
-        container_existed = container is not None
         if container:
             verbose_info(f"Container '{container_name}' found.")
             if getattr(args, "env", None):
                 print(self.formatter.warning(
                     f"Container '{container_name}' already exists; --env is ignored. "
-                    f"Recreate it to apply new environment variables, e.g.: nihil remove {container_name} && nihil start {container_name} --env ..."
+                    f"Recreate it to apply new environment variables, e.g.: nihil upgrade {container_name} --env ..."
                 ))
             if getattr(args, "vpn", None) and self._container_uses_host_network(container):
                 print(self.formatter.error(
@@ -805,8 +811,11 @@ class NihilController:
         if container.status != "running":
             print(self.formatter.error(f"Container '{container_name}' is not running."), file=sys.stderr)
             return 1
+        environment = self._parse_env_args(getattr(args, "env", None))
+        if environment is None:
+            return 1
         command = args.exec_command or ["zsh"]
-        self.manager.exec_in_container(container, command)
+        self.manager.exec_in_container(container, command, environment=environment)
         return 0
 
     def _cmd_update(self, args) -> int:
@@ -993,6 +1002,9 @@ class NihilController:
             requested_workspace = os.getcwd()
         if requested_workspace is not None:
             requested_workspace = str(Path(requested_workspace).expanduser().resolve())
+        requested_env = self._parse_env_args(getattr(args, "env", None))
+        if requested_env is None:
+            return 1
 
         errors = 0
         for container_name in container_names:
@@ -1049,6 +1061,12 @@ class NihilController:
                 snapshot.setdefault("volumes", {})[requested_workspace] = {"bind": "/workspace", "mode": "rw"}
                 if old_workspace != requested_workspace:
                     config_changes.append(f"workspace: {requested_workspace}")
+
+            snapshot_env = snapshot.setdefault("environment", {})
+            for key, value in requested_env.items():
+                if snapshot_env.get(key) != value:
+                    snapshot_env[key] = value
+                    config_changes.append(f"env: {key}")
 
             # Récupérer l'ID de l'image actuellement utilisée par le container (peut être dangling)
             try:
@@ -1718,6 +1736,9 @@ class NihilController:
             print(f"Personal branch:   {self.config.personal_image_branch or '-'}")
             return 0
 
+        if action == "list":
+            return self._cmd_images()
+
         if action == "channel":
             if args.channel:
                 self.config.set_image_channel(args.channel)
@@ -1738,8 +1759,9 @@ class NihilController:
                 return self._customize_image(args, manager)
             if action == "build":
                 manager.trigger_build(variant=args.variant or "all", wait=args.wait)
+                state = "completed" if args.wait else "dispatched"
                 print(self.formatter.success(
-                    f"Docker build workflow dispatched for {manager.config.personal_image_repo}:"
+                    f"Docker build workflow {state} for {manager.config.personal_image_repo}:"
                     f"{manager.config.personal_image_branch}"
                 ))
                 print(self.formatter.info("Use 'nihil install <variant>' when the workflow has finished."))
@@ -1756,7 +1778,7 @@ class NihilController:
         import json
         import subprocess
 
-        if not Confirm.ask(
+        if not getattr(args, "web", False) and not Confirm.ask(
             "Create or use your GitHub fork of nihil-images?",
             default=True,
         ):
@@ -1851,6 +1873,60 @@ class NihilController:
         mandatory_names = {tool["name"].lower() for tool in tools if tool["mandatory"]}
         disabled = {name for name in disabled if str(name).lower() not in mandatory_names}
 
+        def save_selection(selected: set[str]) -> int:
+            enabled = sorted(
+                tool["name"] for tool in tools
+                if tool["mandatory"] or tool["name"] not in selected
+            )
+            selection_path.write_text(
+                json.dumps({"version": 2, "enabled_tools": enabled}, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            return len(enabled)
+
+        if getattr(args, "web", False):
+            def apply_and_build(selected: set[str], report, cancel_event) -> None:
+                report(0, 0, "Saving tool selection")
+                save_selection(selected)
+                if args.no_push:
+                    source_manager.activate_personal(path, fork_repo, branch)
+                    report(1, 1, "Customization saved locally")
+                    return
+                report(0, 0, f"Committing and pushing {branch}")
+                subprocess.run(["git", "add", "build/config/tool-selection.json"], cwd=path, check=True)
+                subprocess.run(
+                    ["git", "commit", "-m", f"Customize {args.variant} image tools"],
+                    cwd=path,
+                    check=True,
+                )
+                subprocess.run(["git", "push", "--set-upstream", "origin", branch], cwd=path, check=True)
+                source_manager.activate_personal(path, fork_repo, branch)
+                source_manager.trigger_build(
+                    variant=args.variant, wait=True, progress_callback=report,
+                    cancel_event=cancel_event,
+                )
+
+            try:
+                selected = self._select_tools_web(
+                    tools,
+                    disabled,
+                    title=f"{fork_repo}:{branch}",
+                    on_save=apply_and_build,
+                    action_label="Save locally" if args.no_push else "Apply & build",
+                    can_cancel=not args.no_push,
+                )
+            except (RuntimeError, subprocess.CalledProcessError, ImageSourceError) as exc:
+                print(self.formatter.error(f"Web customization failed: {exc}"), file=sys.stderr)
+                return 1
+            if selected is None:
+                print("Tool selection cancelled.")
+                return 0
+            if args.no_push:
+                print(self.formatter.success(f"Customization saved locally on {branch}"))
+            else:
+                print(self.formatter.success(f"Customization built from {fork_repo}:{branch}"))
+            return 0
+
         while True:
             selected = self._select_tools_tui(tools, disabled, title=f"{fork_repo}:{branch}")
             if selected is None:
@@ -1858,15 +1934,8 @@ class NihilController:
                 return 0
             disabled = selected
 
-            enabled = sorted(
-                tool["name"] for tool in tools
-                if tool["mandatory"] or tool["name"] not in disabled
-            )
-            selection_path.write_text(
-                json.dumps({"version": 2, "enabled_tools": enabled}, indent=2) + "\n",
-                encoding="utf-8",
-            )
-            print(self.formatter.success(f"Saved tool selection: {len(enabled)} enabled"))
+            enabled_count = save_selection(disabled)
+            print(self.formatter.success(f"Saved tool selection: {enabled_count} enabled"))
 
             if args.no_push:
                 source_manager.activate_personal(path, fork_repo, branch)
@@ -1906,6 +1975,18 @@ class NihilController:
         app = ToolSelectorApp(tools, disabled, title)
         app.run()
         return app.return_value
+
+    def _select_tools_web(
+        self, tools: list[dict], disabled: set[str], *, title: str,
+        on_save=None, action_label: str = "Apply selection", can_cancel: bool = False,
+    ) -> set[str] | None:
+        """Run the localhost browser selector and return the disabled tools."""
+        from nihil.features.tool_selector_web import select_tools_web
+
+        return select_tools_web(
+            tools, disabled, title, on_save=on_save, action_label=action_label,
+            can_cancel=can_cancel,
+        )
 
     def _cmd_resources(self, args) -> int:
         from nihil.config import NIHIL_RESOURCES_REPO

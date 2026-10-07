@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+import threading
 import pytest
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -19,6 +20,9 @@ def test_image_commands_are_available():
     assert customize.repo is None
     assert customize.git_protocol == "auto"
     assert customize.git_del is False
+
+    browser = parser.parse_args(["image", "customize", "full", "--web"])
+    assert browser.web is True
 
     https = parser.parse_args(["image", "customize", "web", "--git-protocol", "https"])
     assert https.git_protocol == "https"
@@ -113,6 +117,7 @@ def test_existing_fork_is_reused_and_custom_branch_is_created(tmp_path):
     assert saved == {}
     assert ["gh", "repo", "fork", "TheNullPigeons/nihil-images", "--clone=false"] not in calls
     assert ["git", "switch", "-c", "nihil/web-custom", "upstream/main"] in calls
+    assert ["git", "merge", "--no-edit", "upstream/main"] in calls
 
 
 def test_existing_remote_custom_branch_is_checked_out_after_local_reset(tmp_path):
@@ -260,6 +265,71 @@ def test_trigger_build_dispatches_and_can_wait(tmp_path):
     assert ["gh", "run", "watch", "12345", "--repo", "alice/nihil-images", "--exit-status"] in calls
 
 
+def test_workflow_progress_tracks_github_steps():
+    from nihil.features.image_sources import _workflow_progress
+
+    run = {
+        "status": "in_progress",
+        "jobs": [{"status": "in_progress", "name": "build-web", "steps": [
+            {"name": "Checkout", "status": "completed"},
+            {"name": "Build image", "status": "in_progress"},
+            {"name": "Push image", "status": "queued"},
+        ]}],
+    }
+    assert _workflow_progress(run) == (1, 3, "Build image")
+
+
+def test_trigger_build_reports_progress_to_web_ui(tmp_path):
+    config = SimpleNamespace(
+        image_sources_home=tmp_path,
+        personal_image_repo="alice/nihil-images",
+        personal_image_branch="nihil/web-custom",
+    )
+    manager = ImageSourceManager(config)
+    updates = []
+
+    def fake_run(command, **kwargs):
+        if command[:3] == ["gh", "run", "list"]:
+            return json.dumps([{"databaseId": 42, "createdAt": "2099-01-01T00:00:00Z"}])
+        if command[:3] == ["gh", "run", "view"]:
+            if "--log" in command:
+                return "complete build log"
+            return json.dumps({
+                "status": "completed", "conclusion": "success", "url": "https://github.test/run/42",
+                "jobs": [{"status": "completed", "steps": [{"name": "Build", "status": "completed"}]}],
+            })
+        return ""
+
+    manager._run = fake_run
+    manager.trigger_build(wait=True, progress_callback=lambda *update: updates.append(update))
+    assert updates[-1] == (1, 1, "Build logs ready", "https://github.test/run/42", "complete build log")
+
+
+def test_web_build_can_be_cancelled(tmp_path, monkeypatch):
+    from nihil.features.image_sources import BuildCancelled
+
+    manager = ImageSourceManager(SimpleNamespace(image_sources_home=tmp_path))
+    calls = []
+    runs = iter([
+        {"status": "in_progress", "conclusion": "", "url": "https://github.test/run/42", "jobs": []},
+        {"status": "completed", "conclusion": "cancelled", "url": "https://github.test/run/42", "jobs": []},
+    ])
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        if "--log" in command:
+            return "cancelled build log"
+        return json.dumps(next(runs)) if command[:3] == ["gh", "run", "view"] else ""
+
+    manager._run = fake_run
+    monkeypatch.setattr("nihil.features.image_sources.time.sleep", lambda _: None)
+    cancelled = threading.Event()
+    cancelled.set()
+    with pytest.raises(BuildCancelled):
+        manager._watch_build("42", "alice/nihil-images", lambda *args: None, cancelled)
+    assert ["gh", "run", "cancel", "42", "--repo", "alice/nihil-images"] in calls
+
+
 def test_personal_source_repoints_docker_image_references():
     from nihil.cli.controller import NihilController
 
@@ -390,3 +460,39 @@ def test_customization_only_activates_source_on_success(tmp_path, monkeypatch, a
         assert rc == (0 if outcome == "cancel" else 1)
         assert config._data == before
         config.save.assert_not_called()
+
+
+def test_web_customization_pushes_and_builds_without_terminal_confirmation(tmp_path, monkeypatch):
+    import subprocess
+    from unittest.mock import Mock
+    from nihil.cli.controller import NihilController
+
+    path = tmp_path / "nihil-images"
+    (path / "build" / "config").mkdir(parents=True)
+    (path / "build" / "config" / "tools.json").write_text(json.dumps({
+        "core_tools": [{"name": "vim"}], "mod_web": [{"name": "httpx"}],
+    }))
+    source = Mock()
+    source.ensure_personal_fork.return_value = (path, "alice/nihil-images", "nihil/web-custom")
+    source.trigger_build.side_effect = lambda **kwargs: kwargs["progress_callback"](
+        1, 1, "Build finished", "https://github.test/run/42",
+    )
+    controller = NihilController.__new__(NihilController)
+    controller.formatter = Mock(console=None)
+
+    def select_web(tools, disabled, **kwargs):
+        kwargs["on_save"]({"httpx"}, lambda *args: None, threading.Event())
+        assert kwargs["action_label"] == "Apply & build"
+        assert kwargs["can_cancel"] is True
+        return {"httpx"}
+
+    controller._select_tools_web = select_web
+    monkeypatch.setattr("rich.prompt.Confirm.ask", Mock(side_effect=AssertionError("unexpected prompt")))
+    git = Mock()
+    monkeypatch.setattr(subprocess, "run", git)
+
+    args = create_parser().parse_args(["image", "customize", "web", "--web"])
+    assert controller._customize_image(args, source) == 0
+    source.activate_personal.assert_called_once_with(path, "alice/nihil-images", "nihil/web-custom")
+    source.trigger_build.assert_called_once()
+    assert git.call_count == 3

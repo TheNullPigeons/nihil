@@ -42,6 +42,8 @@ class ToolSelectorApp(App[set[str] | None]):
         Binding("/", "search_open", "Search", show=False),
         Binding("j", "move_down", "↓", show=False),
         Binding("k", "move_up", "↑", show=False),
+        Binding("ctrl+d", "half_page_down", "½ page down", show=False),
+        Binding("ctrl+u", "half_page_up", "½ page up", show=False),
         Binding("g", "move_top", "Top", show=False),
         Binding("G", "move_bottom", "Bottom", show=False),
     ]
@@ -61,7 +63,7 @@ class ToolSelectorApp(App[set[str] | None]):
         with Container():
             yield Static(self.title_text, id="title")
             yield Static(
-                "↑/↓ or j/k: move | /: search | Space: toggle | v: select range | Enter: save | q: cancel",
+                "↑/↓ or j/k: move | Ctrl+U/D: ½ page | /: search | Space: toggle | v: select range | Enter: save | q: cancel",
                 id="status",
             )
             yield ToolSearchInput(placeholder="/search...", id="search")
@@ -146,6 +148,22 @@ class ToolSelectorApp(App[set[str] | None]):
         if self.visual_mode:
             self._refresh_visual_markers()
             self._set_status(self._visual_status())
+
+    def _half_page(self, direction: int) -> None:
+        table = self._table()
+        rows = max((table.scrollable_content_region.height - table.header_height) // 2, 1)
+        target = min(max(self._cursor_row() + direction * rows, 0), max(table.row_count - 1, 0))
+        table.scroll_relative(y=direction * rows, animate=False, force=True)
+        table.move_cursor(row=target, scroll=False)
+        if self.visual_mode:
+            self._refresh_visual_markers()
+            self._set_status(self._visual_status())
+
+    def action_half_page_down(self) -> None:
+        self._half_page(1)
+
+    def action_half_page_up(self) -> None:
+        self._half_page(-1)
 
     def action_move_top(self) -> None:
         self._table().move_cursor(row=0)

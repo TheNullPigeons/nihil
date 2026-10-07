@@ -76,6 +76,23 @@ class TestNihilManager:
             ["docker", "exec", "-i", "container-id", *command]
         )
     
+    def test_exec_in_container_passes_environment(self):
+        """Forward per-command environment variables to docker exec."""
+        manager = object.__new__(NihilManager)
+
+        with (
+            patch("nihil.manager.manager.sys.stdin.isatty", return_value=False),
+            patch("nihil.manager.manager.subprocess.run") as run,
+            patch("signal.signal"),
+        ):
+            manager.exec_in_container(
+                SimpleNamespace(id="container-id"), ["env"], environment={"A": "1", "B": "x=y"}
+            )
+
+        run.assert_called_once_with(
+            ["docker", "exec", "-i", "-e", "A=1", "-e", "B=x=y", "container-id", "env"]
+        )
+
     def test_ensure_image_exists_image_found(self, mock_docker_client):
         """Test ensure_image_exists quand l'image existe déjà"""
         mock_image = MagicMock()
