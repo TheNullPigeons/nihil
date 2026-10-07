@@ -769,13 +769,19 @@ class NihilManager:
             print(f"Warning: could not copy file into container: {e}", file=sys.stderr)
             return False
 
-    def exec_in_container(self, container, command: str | list[str] = "zsh"):
+    def exec_in_container(
+        self,
+        container,
+        command: str | list[str] = "zsh",
+        environment: Optional[Dict[str, str]] = None,
+    ):
         import shlex
         import signal
         container_id = container.id
         cmd_args = command if isinstance(command, list) else shlex.split(command)
         exec_mode = "-it" if sys.stdin.isatty() and sys.stdout.isatty() else "-i"
-        full_command = ["docker", "exec", exec_mode, container_id] + cmd_args
+        env_args = [arg for key, value in (environment or {}).items() for arg in ("-e", f"{key}={value}")]
+        full_command = ["docker", "exec", exec_mode, *env_args, container_id] + cmd_args
         old = signal.signal(signal.SIGINT, signal.SIG_IGN)
         try:
             subprocess.run(full_command)

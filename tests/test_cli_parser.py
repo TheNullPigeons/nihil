@@ -115,6 +115,12 @@ class TestCreateParser:
         assert args.exec_command == ["bash"]
         assert args.command == "exec"
 
+    def test_parse_exec_with_env(self):
+        parser = create_parser()
+        args = parser.parse_args(["exec", "c1", "-e", "A=1", "--env", "B", "--", "env"])
+        assert args.env == ["A=1", "B"]
+        assert args.exec_command == ["env"]
+
     def test_parse_install(self):
         parser = create_parser()
         args = parser.parse_args(["install", "full"])
@@ -183,6 +189,11 @@ class TestCreateParser:
         assert args.standard is True
         assert args.privileged is False
         assert args.workspace_here is True
+
+    def test_parse_upgrade_with_env(self):
+        parser = create_parser()
+        args = parser.parse_args(["upgrade", "pentest", "-e", "TOKEN=abc", "--env", "HOME_VAR"])
+        assert args.env == ["TOKEN=abc", "HOME_VAR"]
 
     def test_parse_tools_ctf(self):
         parser = create_parser()

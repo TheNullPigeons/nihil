@@ -44,6 +44,36 @@ class TestMainEntryPoint:
         banner.assert_not_called()
 
 
+class TestExecEnv:
+    """Tests pour `nihil exec --env`."""
+
+    def test_exec_forwards_env_to_manager(self, monkeypatch):
+        from nihil.cli.controller import NihilController
+        monkeypatch.setenv("HOST_VAR", "from-host")
+        controller = object.__new__(NihilController)
+        controller.formatter = MagicMock()
+        controller.manager = MagicMock()
+        container = SimpleNamespace(status="running")
+        controller.manager.get_container.return_value = container
+        args = SimpleNamespace(name="c1", exec_command=["env"], env=["A=1", "HOST_VAR"])
+
+        assert controller._cmd_exec(args) == 0
+        controller.manager.exec_in_container.assert_called_once_with(
+            container, ["env"], environment={"A": "1", "HOST_VAR": "from-host"}
+        )
+
+    def test_exec_rejects_invalid_env(self):
+        from nihil.cli.controller import NihilController
+        controller = object.__new__(NihilController)
+        controller.formatter = MagicMock()
+        controller.manager = MagicMock()
+        controller.manager.get_container.return_value = SimpleNamespace(status="running")
+        args = SimpleNamespace(name="c1", exec_command=[], env=["=oops"])
+
+        assert controller._cmd_exec(args) == 1
+        controller.manager.exec_in_container.assert_not_called()
+
+
 class TestStartShellCommand:
     """Tests pour le shell interactif lance par `nihil start`."""
 

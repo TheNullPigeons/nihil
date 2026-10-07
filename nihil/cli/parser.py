@@ -32,6 +32,8 @@ Examples:
   nihil upgrade                        Upgrade all nihil containers (interactive)
   nihil upgrade pentest                Upgrade a specific container
   nihil upgrade pentest blueteam        Upgrade multiple containers
+  nihil upgrade pentest -e TOKEN=abc   Recreate a container with an extra env var
+  nihil exec pentest -e DEBUG=1 -- env Run a command with an extra env var
   nihil profile create redteam         Create a profile interactively
   nihil start pentest --profile redteam
   nihil resources install              Clone the shared nihil-resources catalog
@@ -221,9 +223,11 @@ Examples:
     upgrade_parser.add_argument("--network", choices=["docker", "host", "disabled", "nat"], default=None, help="Change network mode during the upgrade.")
     upgrade_parser.add_argument("--workspace", "-w", default=None, metavar="PATH", help="Change the host path mounted as /workspace.")
     upgrade_parser.add_argument("--workspace-here", "-W", action="store_true", help="Mount the current working directory as /workspace during the upgrade.")
+    upgrade_parser.add_argument("--env", "-e", action="append", default=None, metavar="KEY[=VALUE]", help="Add or override an environment variable in the recreated container (repeatable). Without VALUE, forwards the value from the host environment.")
 
     exec_parser = subparsers.add_parser("exec", help="Execute a command in a container")
     exec_parser.add_argument("name", help="Container name")
+    exec_parser.add_argument("--env", "-e", action="append", default=None, metavar="KEY[=VALUE]", help="Set an environment variable for this command only (repeatable). Without VALUE, forwards the value from the host environment.")
     exec_parser.add_argument("exec_command", nargs="*", help="Command to execute (default: zsh)")
 
     tools_parser = subparsers.add_parser("tools", help="List tools available in a nihil image")

@@ -346,7 +346,7 @@ class NihilController:
             if getattr(args, "env", None):
                 print(self.formatter.warning(
                     f"Container '{container_name}' already exists; --env is ignored. "
-                    f"Recreate it to apply new environment variables, e.g.: nihil remove {container_name} && nihil start {container_name} --env ..."
+                    f"Recreate it to apply new environment variables, e.g.: nihil upgrade {container_name} --env ..."
                 ))
             if getattr(args, "vpn", None) and self._container_uses_host_network(container):
                 print(self.formatter.error(
@@ -838,8 +838,11 @@ class NihilController:
         if container.status != "running":
             print(self.formatter.error(f"Container '{container_name}' is not running."), file=sys.stderr)
             return 1
+        environment = self._parse_env_args(getattr(args, "env", None))
+        if environment is None:
+            return 1
         command = args.exec_command or ["zsh"]
-        self.manager.exec_in_container(container, command)
+        self.manager.exec_in_container(container, command, environment=environment)
         return 0
 
     def _cmd_update(self, args) -> int:
@@ -1026,6 +1029,9 @@ class NihilController:
             requested_workspace = os.getcwd()
         if requested_workspace is not None:
             requested_workspace = str(Path(requested_workspace).expanduser().resolve())
+        requested_env = self._parse_env_args(getattr(args, "env", None))
+        if requested_env is None:
+            return 1
 
         errors = 0
         for container_name in container_names:
@@ -1082,6 +1088,12 @@ class NihilController:
                 snapshot.setdefault("volumes", {})[requested_workspace] = {"bind": "/workspace", "mode": "rw"}
                 if old_workspace != requested_workspace:
                     config_changes.append(f"workspace: {requested_workspace}")
+
+            snapshot_env = snapshot.setdefault("environment", {})
+            for key, value in requested_env.items():
+                if snapshot_env.get(key) != value:
+                    snapshot_env[key] = value
+                    config_changes.append(f"env: {key}")
 
             # Récupérer l'ID de l'image actuellement utilisée par le container (peut être dangling)
             try:
