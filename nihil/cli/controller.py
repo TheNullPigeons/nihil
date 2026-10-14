@@ -1228,26 +1228,35 @@ class NihilController:
             saved_files = self.manager.extract_container_data(container, paths_to_preserve)
 
             # 4. Stopper + supprimer l'ancien container
-            if container.status == "running":
+            was_running = container.status == "running"
+            if was_running:
                 print(self.formatter.info(f"Stopping container '{container_name}'..."))
                 self.manager.stop_container(container)
             print(self.formatter.info(f"Removing old container '{container_name}'..."))
             self.manager.remove_container(container, force=True)
 
-            # 5. Recréer + démarrer le container
+            # 5. Recréer le container en conservant son état initial
             print(self.formatter.info(f"Recreating container '{container_name}'..."))
             try:
                 new_container = self.manager.recreate_container(snapshot)
-                self.manager.start_container(new_container)
+                keep_running = was_running or start_after_upgrade
+                if keep_running or saved_files:
+                    self.manager.start_container(new_container)
 
-                new_env = new_container.attrs.get("Config", {}).get("Env") or []
-                if any(e in ("NIHIL_VPN=managed", "NIHIL_VPN=1") for e in new_env):
-                    if not self.manager.wait_for_vpn(new_container, timeout=2):
-                        self._start_vpn_with_feedback(new_container)
+                try:
+                    if saved_files:
+                        print(self.formatter.info("Restoring container specific files..."))
+                        self.manager.restore_container_data(new_container, saved_files)
+                    if keep_running:
+                        new_env = new_container.attrs.get("Config", {}).get("Env") or []
+                        if any(e in ("NIHIL_VPN=managed", "NIHIL_VPN=1") for e in new_env):
+                            if not self.manager.wait_for_vpn(new_container, timeout=2):
+                                self._start_vpn_with_feedback(new_container)
+                finally:
+                    # Restoration uses exec, so stopped containers must run temporarily.
+                    if saved_files and not keep_running:
+                        self.manager.stop_container(new_container)
 
-                if saved_files:
-                    print(self.formatter.info("Restoring container specific files..."))
-                    self.manager.restore_container_data(new_container, saved_files)
 
                 old_label = f"{old_short or '?'}"
                 if current_display_version:
@@ -1256,7 +1265,8 @@ class NihilController:
                 if new_display_version:
                     new_label = f"{new_label} {new_display_version}"
                 print(self.formatter.success(
-                    f"Container '{container_name}' upgraded and restarted successfully "
+                    f"Container '{container_name}' upgraded successfully "
+                    f"({'running' if keep_running else 'stopped'}) "
                     f"({old_label} → {new_label})."
                 ))
                 if start_after_upgrade:

@@ -93,8 +93,11 @@ def test_legacy_session_waits_for_entrypoint_before_replacement(controller, tmp_
 
 
 @pytest.mark.parametrize("vpn_flag", ["managed", "1"])
-def test_upgrade_checks_vpn_before_opening_shell(controller, vpn_flag):
+@pytest.mark.parametrize("status", ["running", "exited"])
+@pytest.mark.parametrize("start", [False, True])
+def test_upgrade_checks_vpn_before_opening_shell(controller, vpn_flag, status, start):
     container = controller.manager.get_container.return_value
+    container.status = status
     controller.manager.snapshot_container_config.return_value = {
         "name": "box", "image": "nihil/full:latest", "privileged": False,
         "volumes": {}, "network_mode": "bridge",
@@ -107,9 +110,18 @@ def test_upgrade_checks_vpn_before_opening_shell(controller, vpn_flag):
     upgraded = controller.manager.recreate_container.return_value
     upgraded.status = "running"
     upgraded.attrs = {"Config": {"Env": [f"NIHIL_VPN={vpn_flag}"]}}
-    args = create_parser().parse_args(["upgrade", "box", "--force", "--start"])
+    args = create_parser().parse_args(["upgrade", "box", "--force"] + (["--start"] if start else []))
 
     assert controller._cmd_upgrade(args) == 0
-    controller.manager.wait_for_vpn.assert_called_once_with(upgraded, timeout=2)
-    controller._start_vpn_with_feedback.assert_called_once_with(upgraded)
-    controller.manager.exec_in_container.assert_called_once_with(upgraded, "zsh")
+    if status == "running" or start:
+        controller.manager.start_container.assert_called_once_with(upgraded)
+        controller.manager.wait_for_vpn.assert_called_once_with(upgraded, timeout=2)
+        controller._start_vpn_with_feedback.assert_called_once_with(upgraded)
+    else:
+        controller.manager.start_container.assert_not_called()
+        controller.manager.wait_for_vpn.assert_not_called()
+        controller._start_vpn_with_feedback.assert_not_called()
+    if start:
+        controller.manager.exec_in_container.assert_called_once_with(upgraded, "zsh")
+    else:
+        controller.manager.exec_in_container.assert_not_called()

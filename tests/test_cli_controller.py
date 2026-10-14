@@ -44,6 +44,67 @@ class TestMainEntryPoint:
         banner.assert_not_called()
 
 
+class TestUpgradeContainerState:
+    @pytest.mark.parametrize("status", ["running", "exited"])
+    @pytest.mark.parametrize("saved_files", [{}, {"/root/.zsh_history": b"archive"}])
+    @pytest.mark.parametrize("mode", ["named", "all", "start", "restore-error"])
+    def test_upgrade_preserves_state(self, status, saved_files, mode):
+        from nihil.cli.controller import NihilController
+
+        controller = NihilController.__new__(NihilController)
+        controller.formatter = MagicMock()
+        controller.config = SimpleNamespace(
+            x11_by_default=False, wayland_by_default=False, default_shell="zsh"
+        )
+        manager = controller.manager = MagicMock()
+        container = SimpleNamespace(
+            name="lab", status=status, image=SimpleNamespace(id="old", short_id="old")
+        )
+        new_container = SimpleNamespace(status="created", attrs={})
+        manager.get_container.return_value = container
+        manager.list_containers.return_value = [container]
+        manager.snapshot_container_config.return_value = {
+            "image": "nihil/full:local", "environment": {}
+        }
+        manager.refresh_display_forwarding.return_value = False
+        manager._variant_for_image_tag.return_value = None
+        manager.client.images.get.return_value = SimpleNamespace(id="new", short_id="new")
+        manager.extract_container_data.return_value = saved_files
+        manager.recreate_container.return_value = new_container
+        manager.start_container.side_effect = lambda c: setattr(c, "status", "running")
+        manager.stop_container.side_effect = lambda c: setattr(c, "status", "exited")
+        if mode == "restore-error":
+            manager.restore_container_data.side_effect = RuntimeError("restore failed")
+        args = SimpleNamespace(
+            names=[] if mode == "all" else ["lab"],
+            all=mode == "all", start=mode == "start",
+        )
+
+        failed = mode == "restore-error" and bool(saved_files)
+        assert controller._cmd_upgrade(args) == (1 if failed else 0)
+
+        keep_running = status == "running" or mode == "start"
+        assert (new_container.status == "running") == keep_running
+        if keep_running or saved_files:
+            manager.start_container.assert_called_once_with(new_container)
+        else:
+            manager.start_container.assert_not_called()
+        if status == "running":
+            manager.stop_container.assert_any_call(container)
+        if saved_files:
+            manager.restore_container_data.assert_called_once_with(new_container, saved_files)
+            if not keep_running:
+                manager.stop_container.assert_called_once_with(new_container)
+        else:
+            manager.restore_container_data.assert_not_called()
+        if mode == "start":
+            manager.exec_in_container.assert_called_once_with(new_container, "zsh")
+        else:
+            manager.exec_in_container.assert_not_called()
+        if mode == "all":
+            manager.list_containers.assert_called_once_with(all=True)
+
+
 class TestExecEnv:
     """Tests pour `nihil exec --env`."""
 
