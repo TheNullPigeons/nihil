@@ -30,6 +30,8 @@ Examples:
   nihil update                         Update all installed images
   nihil update ad                      Update the ad image only
   nihil upgrade                        Upgrade all nihil containers (interactive)
+  nihil restart pentest                Restart a specific container
+  nihil restart pentest blueteam       Restart multiple containers
   nihil upgrade pentest                Upgrade a specific container
   nihil upgrade pentest blueteam        Upgrade multiple containers
   nihil upgrade pentest -e TOKEN=abc   Recreate a container with an extra env var
@@ -193,6 +195,10 @@ Examples:
 
     stop_parser = subparsers.add_parser("stop", help="Stop one or more containers")
     stop_parser.add_argument("names", nargs="+", help="Container name(s)")
+
+    restart_parser = subparsers.add_parser("restart", help="Restart one or more containers (stop + start)")
+    restart_parser.add_argument("names", nargs="+", help="Container name(s)")
+    restart_parser.add_argument("--no-shell", action="store_true", help="Don't open shell after restarting")
 
     remove_parser = subparsers.add_parser("remove", help="Remove one or more containers")
     remove_parser.add_argument("names", nargs="*", help="Container name(s)")

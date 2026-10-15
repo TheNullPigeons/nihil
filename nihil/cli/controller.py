@@ -189,6 +189,8 @@ class NihilController:
             return self._cmd_start(parsed_args)
         elif parsed_args.command == "stop":
             return self._cmd_stop(parsed_args)
+        elif parsed_args.command == "restart":
+            return self._cmd_restart(parsed_args)
         elif parsed_args.command == "remove":
             return self._cmd_remove(parsed_args)
         elif parsed_args.command == "exec":
@@ -759,6 +761,37 @@ class NihilController:
             print(self.formatter.info(f"Stopping container '{container_name}'..."))
             self.manager.stop_container(container)
             print(self.formatter.success(f"Container '{container_name}' stopped successfully."))
+        return 1 if errors > 0 else 0
+
+    def _cmd_restart(self, args) -> int:
+        errors = 0
+        containers_to_enter = []
+        for container_name in args.names:
+            container = self.manager.get_container(container_name)
+            if not container:
+                print(self.formatter.error(f"Container '{container_name}' doesn't exist."), file=sys.stderr)
+                errors += 1
+                continue
+            if container.status == "running":
+                print(self.formatter.info(f"Stopping container '{container_name}'..."))
+                self.manager.stop_container(container)
+            print(self.formatter.info(f"Starting container '{container_name}'..."))
+            self.manager.start_container(container)
+            env_list = container.attrs.get("Config", {}).get("Env") or []
+            if any(e in ("NIHIL_VPN=managed", "NIHIL_VPN=1") for e in env_list):
+                if not self.manager.wait_for_vpn(container, timeout=2):
+                    self._start_vpn_with_feedback(container)
+            print(self.formatter.success(f"Container '{container_name}' restarted successfully."))
+            containers_to_enter.append(container)
+        if not getattr(args, "no_shell", False) and len(containers_to_enter) == 1:
+            shell = getattr(self.config, "default_shell", "zsh")
+            if shell == "tmux":
+                command = "tmux new-session -A -s nihil"
+            elif shell == "bash":
+                command = "bash"
+            else:
+                command = "zsh"
+            self.manager.exec_in_container(containers_to_enter[0], command)
         return 1 if errors > 0 else 0
 
     def _cmd_remove(self, args) -> int:
