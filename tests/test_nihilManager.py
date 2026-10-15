@@ -346,7 +346,7 @@ class TestNihilManager:
         config = mock_docker_client.containers.create.call_args.kwargs
         assert config["volumes"][str(vpn_file.resolve())]["bind"] == "/opt/nihil/vpn/client.ovpn"
         assert config["volumes"][str(vpn_file.resolve())]["mode"] == "ro"
-        assert config["environment"]["NIHIL_VPN"] == "1"
+        assert config["environment"]["NIHIL_VPN"] == "managed"
         assert config["cap_add"] == ["NET_ADMIN"]
         assert config["devices"] == ["/dev/net/tun"]
 

@@ -117,6 +117,24 @@ class NihilController:
     def _container_uses_host_network(self, container) -> bool:
         return (container.attrs.get("HostConfig") or {}).get("NetworkMode") == "host"
 
+    def _start_vpn_with_feedback(self, container, config_path: str = "/opt/nihil/vpn/client.ovpn") -> None:
+        """Start OpenVPN inside the container and wait for the tunnel with a visual spinner."""
+        try:
+            with self._loading("Starting OpenVPN and waiting for tunnel (tun0)..."):
+                connected = self.manager.start_vpn(container, config_path=config_path)
+            if connected:
+                print(self.formatter.success("VPN tunnel established."))
+            else:
+                print(self.formatter.warning(
+                    "VPN tunnel did not come up within the timeout. "
+                    "OpenVPN may still be connecting in background; "
+                    "check with 'ip a show tun0' or 'cat /var/log/nihil/vpn.log' inside the container."
+                ))
+        except KeyboardInterrupt:
+            print(self.formatter.warning(
+                "Skipping VPN wait (Ctrl+C). OpenVPN is still starting in background."
+            ))
+
     def run(self, args: Optional[list] = None) -> int:
         parsed_args = self.parser.parse_args(args)
         should_show_banner = (
@@ -336,6 +354,12 @@ class NihilController:
                 if verbose:
                     print(self.formatter.success(f"Container '{container_name}' started successfully."))
             env_list = container.attrs.get("Config", {}).get("Env") or []
+            container_has_vpn_config = any(
+                e in ("NIHIL_VPN=managed", "NIHIL_VPN=1") for e in env_list
+            )
+            session_vpn_requested = bool(getattr(args, "vpn", None))
+            if container_has_vpn_config and not session_vpn_requested and not self.manager.wait_for_vpn(container, timeout=2):
+                self._start_vpn_with_feedback(container)
             delay_info = not args.no_shell and any(e == "NIHIL_BROWSER_UI=1" for e in env_list)
             if verbose and not delay_info:
                 self._print_container_info(container, args, created=False, update_available=get_update(container))
@@ -463,36 +487,41 @@ class NihilController:
                         print(self.formatter.success("User setup script completed."))
                 except RuntimeError as e:
                     print(self.formatter.warning(f"User setup script failed: {e}"))
+            if bool(vpn_path):
+                self._start_vpn_with_feedback(container)
             if verbose and not (browser_ui_enabled and not args.no_shell):
                 self._print_container_info(container, args, created=True, update_available=get_update(container))
-        if not args.no_shell:
-            command = self._start_shell_command(args)
-            try:
-                vpn_path = self._resolve_vpn_config_path(getattr(args, "vpn", None))
-            except (FileNotFoundError, ValueError) as e:
-                print(self.formatter.error(str(e)), file=sys.stderr)
-                return 1
-            if container_existed and vpn_path:
-                if not self.manager.container_has_tun(container):
-                    print(self.formatter.error(
-                        "This container has no VPN support (/dev/net/tun missing). "
-                        "To use VPN, create a new container with --vpn, e.g.: nihil remove demo && nihil start demo --vpn ~/vpn/file.ovpn"
-                    ))
-                else:
-                    vpn_file = Path(vpn_path).expanduser().resolve()
-                    if vpn_file.is_file():
-                        if self.manager.copy_file_into_container(container, str(vpn_file), "/tmp/nihil_vpn.ovpn"):
-                            print(self.formatter.info("VPN config copied into container; VPN will start for this session and stop when you exit."))
-                            vpn_script = (
-                                "openvpn --config /tmp/nihil_vpn.ovpn --daemon >/dev/null 2>&1; "
-                                f"sleep 2; {command}; "
-                                "killall openvpn >/dev/null 2>&1; exit 0"
-                            )
-                            command = f"sh -c {shlex.quote(vpn_script)}"
-                        else:
-                            print(self.formatter.warning("Could not copy VPN config into container. Start OpenVPN manually if needed."))
+        command = self._start_shell_command(args)
+        try:
+            vpn_path = self._resolve_vpn_config_path(getattr(args, "vpn", None))
+        except (FileNotFoundError, ValueError) as e:
+            print(self.formatter.error(str(e)), file=sys.stderr)
+            return 1
+        if container_existed and vpn_path:
+            if not self.manager.container_has_tun(container):
+                print(self.formatter.error(
+                    "This container has no VPN support (/dev/net/tun missing). "
+                    "To use VPN, create a new container with --vpn, e.g.: nihil remove demo && nihil start demo --vpn ~/vpn/file.ovpn"
+                ))
+            else:
+                vpn_file = Path(vpn_path).expanduser().resolve()
+                if vpn_file.is_file():
+                    env_list = container.attrs.get("Config", {}).get("Env") or []
+                    if "NIHIL_VPN=1" in env_list:
+                        with self._loading("Waiting for the legacy VPN before replacing it..."):
+                            legacy_ready = self.manager.wait_for_vpn(container)
+                        if not legacy_ready:
+                            print(self.formatter.error("Legacy VPN is not ready; refusing to start a competing OpenVPN process. Retry after startup completes."))
+                            return 1
+                    if self.manager.copy_file_into_container(container, str(vpn_file), "/tmp/nihil_vpn.ovpn"):
+                        container.exec_run(["killall", "openvpn"])
+                        self._start_vpn_with_feedback(container, config_path="/tmp/nihil_vpn.ovpn")
+                        command = f"sh -c {shlex.quote(command + '; killall openvpn >/dev/null 2>&1')}"
                     else:
-                        print(self.formatter.warning(f"VPN file not found: {vpn_file}"))
+                        print(self.formatter.warning("Could not copy VPN config into container. Start OpenVPN manually if needed."))
+                else:
+                    print(self.formatter.warning(f"VPN file not found: {vpn_file}"))
+        if not args.no_shell:
             if args.log and not command.startswith("sh -c "):
                 import datetime
                 timestamp = datetime.datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
@@ -601,7 +630,7 @@ class NihilController:
             my_resources_display = f"[green]Enabled[/] ({my_resources_mount} → /opt/my-resources)"
         else:
             my_resources_display = "[red]Disabled[/]"
-        vpn_flag = env.get("NIHIL_VPN") == "1"
+        vpn_flag = env.get("NIHIL_VPN") in ("1", "managed")
         requested_session_vpn = bool(getattr(args, "vpn", None)) and not created
         has_tun = False
         try:
@@ -609,7 +638,7 @@ class NihilController:
         except Exception:
             has_tun = False
         if vpn_flag:
-            vpn_display = "[green]Enabled[/] (NIHIL_VPN=1)"
+            vpn_display = "[green]Enabled[/]"
         elif requested_session_vpn and has_tun:
             vpn_display = "[yellow]Session only[/] (config copied inside)"
         else:
@@ -1181,7 +1210,12 @@ class NihilController:
             try:
                 new_container = self.manager.recreate_container(snapshot)
                 self.manager.start_container(new_container)
-                
+
+                new_env = new_container.attrs.get("Config", {}).get("Env") or []
+                if any(e in ("NIHIL_VPN=managed", "NIHIL_VPN=1") for e in new_env):
+                    if not self.manager.wait_for_vpn(new_container, timeout=2):
+                        self._start_vpn_with_feedback(new_container)
+
                 if saved_files:
                     print(self.formatter.info("Restoring container specific files..."))
                     self.manager.restore_container_data(new_container, saved_files)

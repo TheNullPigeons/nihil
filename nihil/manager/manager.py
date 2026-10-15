@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import time
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 
@@ -378,7 +379,7 @@ class NihilManager:
                 container_config["environment"] = dict(
                     kv.split("=", 1) for kv in container_config["environment"] if "=" in kv
                 )
-            container_config["environment"]["NIHIL_VPN"] = "1"
+            container_config["environment"]["NIHIL_VPN"] = "managed"
         if enable_x11:
             from nihil.utils.platform_info import get_host_os, HostOS
             _host_os = get_host_os()
@@ -730,6 +731,35 @@ class NihilManager:
         except Exception:
             return False
 
+    def start_vpn(self, container, config_path: str = "/opt/nihil/vpn/client.ovpn") -> bool:
+        """Start OpenVPN inside the container and wait for the tunnel."""
+        env = container.attrs.get("Config", {}).get("Env") or []
+        # Legacy entrypoints still own startup, even when their setup is slow.
+        if "NIHIL_VPN=1" in env and config_path == "/opt/nihil/vpn/client.ovpn":
+            return self.wait_for_vpn(container)
+        container.exec_run(["mkdir", "-p", "/var/log/nihil"])
+        container.exec_run(
+            ["openvpn", "--log-append", "/var/log/nihil/vpn.log",
+             "--config", config_path],
+            detach=True,
+        )
+        return self.wait_for_vpn(container)
+
+    def wait_for_vpn(self, container, timeout: int = 30) -> bool:
+        """Wait for tun0 to come up inside the container."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                exit_code, _ = container.exec_run(
+                    ["sh", "-c", "ip link show tun0 2>/dev/null | grep -q UP"]
+                )
+                if exit_code == 0:
+                    return True
+            except Exception:
+                pass
+            time.sleep(1)
+        return False
+
     def run_user_setup_script(self, container) -> Optional[str]:
         """Exécute /opt/my-resources/setup/load_user_setup.sh dans le container.
 
@@ -1039,7 +1069,7 @@ class NihilManager:
         environment = snapshot.get("environment") or {}
         if isinstance(environment, list):
             environment = dict(kv.split("=", 1) for kv in environment if "=" in kv)
-        if environment.get("NIHIL_VPN") == "1" and snapshot.get("network_mode") == "host":
+        if environment.get("NIHIL_VPN") in ("1", "managed") and snapshot.get("network_mode") == "host":
             snapshot["network_mode"] = "bridge"
         if snapshot["network_mode"]:
             container_config["network_mode"] = snapshot["network_mode"]
