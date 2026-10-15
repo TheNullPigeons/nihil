@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 import yaml
+from docker.errors import APIError
 
 from nihil.config import ensure_filesystem, NihilConfig, NIHIL_HOME
 from nihil.config.profiles import PROFILE_FIELDS, list_profiles, load_profile, save_profile
@@ -765,33 +766,28 @@ class NihilController:
 
     def _cmd_restart(self, args) -> int:
         errors = 0
-        containers_to_enter = []
         for container_name in args.names:
-            container = self.manager.get_container(container_name)
-            if not container:
-                print(self.formatter.error(f"Container '{container_name}' doesn't exist."), file=sys.stderr)
+            try:
+                container = self.manager.get_container(container_name)
+                if not container:
+                    print(self.formatter.error(f"Container '{container_name}' doesn't exist."), file=sys.stderr)
+                    errors += 1
+                    continue
+                with self._loading(f"Restarting container '{container_name}'..."):
+                    if container.status == "running":
+                        self.manager.stop_container(container)
+                    self.manager.start_container(container)
+                env_list = container.attrs.get("Config", {}).get("Env") or []
+                if any(e in ("NIHIL_VPN=managed", "NIHIL_VPN=1") for e in env_list):
+                    if not self.manager.wait_for_vpn(container, timeout=2):
+                        self._start_vpn_with_feedback(container)
+            except (NihilError, APIError) as exc:
+                print(self.formatter.error(f"Could not restart container '{container_name}': {exc}"), file=sys.stderr)
                 errors += 1
                 continue
-            if container.status == "running":
-                print(self.formatter.info(f"Stopping container '{container_name}'..."))
-                self.manager.stop_container(container)
-            print(self.formatter.info(f"Starting container '{container_name}'..."))
-            self.manager.start_container(container)
-            env_list = container.attrs.get("Config", {}).get("Env") or []
-            if any(e in ("NIHIL_VPN=managed", "NIHIL_VPN=1") for e in env_list):
-                if not self.manager.wait_for_vpn(container, timeout=2):
-                    self._start_vpn_with_feedback(container)
             print(self.formatter.success(f"Container '{container_name}' restarted successfully."))
-            containers_to_enter.append(container)
-        if not getattr(args, "no_shell", False) and len(containers_to_enter) == 1:
-            shell = getattr(self.config, "default_shell", "zsh")
-            if shell == "tmux":
-                command = "tmux new-session -A -s nihil"
-            elif shell == "bash":
-                command = "bash"
-            else:
-                command = "zsh"
-            self.manager.exec_in_container(containers_to_enter[0], command)
+        if not args.no_shell and not errors and len(args.names) == 1:
+            self.manager.exec_in_container(container, self._start_shell_command(args))
         return 1 if errors > 0 else 0
 
     def _cmd_remove(self, args) -> int:
