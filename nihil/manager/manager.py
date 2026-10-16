@@ -745,6 +745,50 @@ class NihilManager:
         )
         return self.wait_for_vpn(container)
 
+    def _running_vpn_config(self, container) -> Optional[str]:
+        """Return the --config path of the OpenVPN process running in the container, if any."""
+        try:
+            exit_code, output = container.exec_run(["pgrep", "-a", "-x", "openvpn"])
+        except Exception:
+            return None
+        if exit_code != 0 or not output:
+            return None
+        for line in output.decode("utf-8", errors="replace").splitlines():
+            args = line.split()
+            if "--config" in args[:-1]:
+                return args[args.index("--config") + 1]
+        return None
+
+    def _container_file_digest(self, container, path: str) -> Optional[str]:
+        try:
+            exit_code, output = container.exec_run(["sha256sum", path])
+        except Exception:
+            return None
+        if exit_code != 0 or not output:
+            return None
+        return output.decode("utf-8", errors="replace").split()[0]
+
+    def find_vpn_conflicts(self, container, config_path: str) -> List[str]:
+        """Names of other running containers whose OpenVPN uses the same config.
+
+        VPN servers usually allow one session per identity, so two tunnels with
+        the same config kick each other off until ping-restart fires.
+        """
+        digest = self._container_file_digest(container, config_path)
+        if not digest:
+            return []
+        conflicts = []
+        for other in self.list_containers(all=False):
+            if other.id == container.id:
+                continue
+            devices = (other.attrs.get("HostConfig") or {}).get("Devices") or []
+            if not any(d.get("PathOnHost") == "/dev/net/tun" for d in devices):
+                continue
+            other_config = self._running_vpn_config(other)
+            if other_config and self._container_file_digest(other, other_config) == digest:
+                conflicts.append(other.name)
+        return conflicts
+
     def wait_for_vpn(self, container, timeout: int = 30) -> bool:
         """Wait for tun0 to come up inside the container."""
         deadline = time.monotonic() + timeout

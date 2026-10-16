@@ -125,3 +125,65 @@ def test_upgrade_checks_vpn_before_opening_shell(controller, vpn_flag, status, s
         controller.manager.exec_in_container.assert_called_once_with(upgraded, "zsh")
     else:
         controller.manager.exec_in_container.assert_not_called()
+
+
+def _vpn_container(cid, name, digest, running_config="/opt/nihil/vpn/client.ovpn", tun=True):
+    container = MagicMock()
+    container.id, container.name = cid, name
+    container.attrs = {"HostConfig": {"Devices": [{"PathOnHost": "/dev/net/tun"}] if tun else None}}
+
+    def exec_run(cmd, **_):
+        if cmd[0] == "pgrep":
+            if running_config is None:
+                return 1, b""
+            return 0, f"42 openvpn --log-append /var/log/nihil/vpn.log --config {running_config}\n".encode()
+        if cmd[0] == "sha256sum":
+            return (0, f"{digest}  {cmd[1]}\n".encode()) if digest else (1, b"")
+        return 0, b""
+
+    container.exec_run.side_effect = exec_run
+    return container
+
+
+def test_find_vpn_conflicts_reports_other_containers_with_same_config():
+    manager = object.__new__(NihilManager)
+    target = _vpn_container("t", "target", "abc", running_config=None)
+    others = [
+        target,
+        _vpn_container("a", "same", "abc", running_config="/tmp/nihil_vpn.ovpn"),
+        _vpn_container("b", "different", "def"),
+        _vpn_container("c", "vpn-down", "abc", running_config=None),
+        _vpn_container("d", "no-tun", "abc", tun=False),
+    ]
+    manager.list_containers = MagicMock(return_value=others)
+
+    assert manager.find_vpn_conflicts(target, "/opt/nihil/vpn/client.ovpn") == ["same"]
+    manager.list_containers.assert_called_once_with(all=False)
+
+
+def test_find_vpn_conflicts_skips_scan_when_config_unreadable():
+    manager = object.__new__(NihilManager)
+    manager.list_containers = MagicMock()
+    target = _vpn_container("t", "target", None)
+
+    assert manager.find_vpn_conflicts(target, "/opt/nihil/vpn/client.ovpn") == []
+    manager.list_containers.assert_not_called()
+
+
+@pytest.mark.parametrize("conflicts", [[], ["other"]])
+def test_start_vpn_warns_on_conflicting_config(conflicts):
+    ctrl = object.__new__(NihilController)
+    ctrl.formatter = MagicMock()
+    ctrl.manager = MagicMock()
+    ctrl.manager.find_vpn_conflicts.return_value = conflicts
+    ctrl.manager.start_vpn.return_value = True
+    ctrl._loading = MagicMock()
+    container = MagicMock()
+
+    ctrl._start_vpn_with_feedback(container)
+
+    ctrl.manager.find_vpn_conflicts.assert_called_once_with(container, "/opt/nihil/vpn/client.ovpn")
+    assert ctrl.formatter.warning.called == bool(conflicts)
+    if conflicts:
+        assert "other" in ctrl.formatter.warning.call_args.args[0]
+    ctrl.manager.start_vpn.assert_called_once()
