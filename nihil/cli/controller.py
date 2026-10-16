@@ -120,6 +120,13 @@ class NihilController:
 
     def _start_vpn_with_feedback(self, container, config_path: str = "/opt/nihil/vpn/client.ovpn") -> None:
         """Start OpenVPN inside the container and wait for the tunnel with a visual spinner."""
+        conflicts = self.manager.find_vpn_conflicts(container, config_path)
+        if conflicts:
+            print(self.formatter.warning(
+                f"This VPN config is already in use by running container(s): {', '.join(conflicts)}. "
+                "Most VPN servers allow one session per identity, so the tunnels will keep dropping. "
+                "Stop the other container or use a different config."
+            ))
         try:
             with self._loading("Starting OpenVPN and waiting for tunnel (tun0)..."):
                 connected = self.manager.start_vpn(container, config_path=config_path)
