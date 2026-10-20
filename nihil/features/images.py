@@ -15,13 +15,13 @@ AVAILABLE_IMAGES = {
 
 # Tag complet -> nom d’affichage compact
 SHORT_NAMES = {
-    "ghcr.io/thenullpigeons/full:latest": "full",
+    "ghcr.io/thenullpigeons/full:latest": "full:main",
     "ghcr.io/thenullpigeons/full:flock": "full",
-    "ghcr.io/thenullpigeons/ad:latest": "ad",
+    "ghcr.io/thenullpigeons/ad:latest": "ad:main",
     "ghcr.io/thenullpigeons/ad:nest": "ad",
-    "ghcr.io/thenullpigeons/web:latest": "web",
+    "ghcr.io/thenullpigeons/web:latest": "web:main",
     "ghcr.io/thenullpigeons/web:beak": "web",
-    "ghcr.io/thenullpigeons/blueteam:latest": "blueteam",
+    "ghcr.io/thenullpigeons/blueteam:latest": "blueteam:main",
     "ghcr.io/thenullpigeons/blueteam:coo": "blueteam",
 }
 
@@ -30,7 +30,7 @@ def short_image_name(full_tag: str) -> str:
     """Retourne un nom court pour l’affichage à partir du tag complet.
 
     Exemples:
-        ‘ghcr.io/thenullpigeons/web:latest’ -> ‘web’
+        ‘ghcr.io/thenullpigeons/web:latest’ -> ‘web:main’
         ‘unknown/my-image:v1’ -> ‘my-image:v1’
     """
     if full_tag in SHORT_NAMES:

@@ -50,6 +50,7 @@ _DEFAULT_CONFIG: dict = {
         "home": str(NIHIL_HOME / "image-sources"),
         "active": "upstream",
         "channel": "main",
+        "prompt_for_dev": True,
         "upstream_repo": "TheNullPigeons/nihil-images",
         "upstream_path": str(NIHIL_HOME / "image-sources" / "upstream" / "nihil-images"),
         "personal_path": None,
@@ -78,6 +79,7 @@ _CONFIG_COMMENT = """\
 # build.images_path           : path to nihil-images source directory (for nihil build)
 # image_sources.active         : upstream | personal
 # image_sources.channel        : main | dev (upstream images)
+# image_sources.prompt_for_dev : offer the dev channel during interactive install
 # image_sources.personal_repo  : GitHub fork used for customized images
 # image_sources.personal_branch: branch used for customized images
 
@@ -252,6 +254,14 @@ class NihilConfig:
         if channel not in ("main", "dev"):
             raise ValueError(f"Unknown image channel: {channel}")
         self._data.setdefault("image_sources", {})["channel"] = channel
+        self.save()
+
+    @property
+    def prompt_for_dev(self) -> bool:
+        return self._get("image_sources", "prompt_for_dev") is not False
+
+    def disable_dev_prompt(self) -> None:
+        self._data.setdefault("image_sources", {})["prompt_for_dev"] = False
         self.save()
 
     @property

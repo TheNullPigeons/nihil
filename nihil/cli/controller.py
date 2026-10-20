@@ -1305,6 +1305,27 @@ class NihilController:
         if not image_tag:
             print(self.formatter.error(f"Unknown image variant: {image_arg}"))
             return 1
+        if (self.config.image_source_active == "upstream"
+                and self.config.image_channel == "main"
+                and self.config.prompt_for_dev and sys.stdin.isatty()):
+            from rich.prompt import Prompt
+            try:
+                choice = Prompt.ask(
+                    "Switch from stable images (main) to development images (dev) "
+                    "for this installation and future image commands? (never: don't ask again)",
+                    choices=["y", "n", "never"], default="n",
+                )
+            except (KeyboardInterrupt, EOFError):
+                print("\nAborted.")
+                return 0
+            if choice == "y":
+                self.config.set_image_channel("dev")
+                self._configure_image_registry()
+                image_tag = self.manager.AVAILABLE_IMAGES[image_arg]
+                print(self.formatter.success("Upstream image channel: dev (saved)."))
+            elif choice == "never":
+                self.config.disable_dev_prompt()
+                print(self.formatter.info("Keeping main; the development channel will not be offered again."))
         print(self.formatter.info(f"Pulling image '{image_tag}'..."))
         try:
             self._login_personal_registry()
@@ -1529,8 +1550,7 @@ class NihilController:
             description = variant_descriptions.get(variant, "Local build")
             info = self.manager.get_image_info(image_url)
             size_str = f"{info['size_bytes'] / (1024**3):.2f} GB" if info else "-"
-            # AVAILABLE liste les :latest courants : pas besoin de @short_id de disambiguation
-            version = self.manager.get_image_version(image_url) or "-"
+            version = self.manager.get_image_display_version(image_url) or "-"
             status = self._format_image_status(image_url, registry_statuses.get(image_url))
             rows.append([variant, self.manager.short_image_name(image_url), version, size_str, status, description])
         self.formatter.print_table(["VARIANT", "IMAGE", "VERSION", "SIZE", "STATUS", "DESCRIPTION"], rows)
@@ -1564,8 +1584,7 @@ class NihilController:
             description = variant_descriptions.get(variant, "Local build")
             info = self.manager.get_image_info(image_url)
             size_str = f"{info['size_bytes'] / (1024**3):.2f} GB" if info else "-"
-            # AVAILABLE liste les :latest courants : pas besoin de @short_id de disambiguation
-            version = self.manager.get_image_version(image_url) or "-"
+            version = self.manager.get_image_display_version(image_url) or "-"
             status = self._format_image_status(image_url, registry_statuses.get(image_url))
             rows.append([variant, self.manager.short_image_name(image_url), version, size_str, status, description])
         self.formatter.print_table(["VARIANT", "IMAGE", "VERSION", "SIZE", "STATUS", "DESCRIPTION"], rows)

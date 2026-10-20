@@ -50,6 +50,11 @@ class TestEnsureFilesystem:
 
 
 class TestNihilConfig:
+    def test_dev_prompt_enabled_for_old_configs(self):
+        config = NihilConfig.__new__(NihilConfig)
+        config._data = {"image_sources": {}}
+        assert config.prompt_for_dev is True
+
     def test_wayland_by_default_falls_back_to_false_for_old_configs(self):
         config = NihilConfig.__new__(NihilConfig)
         config._data = {"display": {}}

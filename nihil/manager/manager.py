@@ -162,6 +162,7 @@ class NihilManager:
         Pour les release tags (v1.2.3), retourne la version telle quelle car le tag git
         est déjà unique. Pour une ref mouvante (main, dev), suffixe avec @<short_id>
         pour distinguer plusieurs builds successifs de la même branche.
+        Une référence upstream :latest est affichée main, même après promotion depuis dev.
         """
         version = self.get_image_version(image_or_tag)
         if not version:
@@ -170,6 +171,9 @@ class NihilManager:
             return version
         try:
             img = image_or_tag if hasattr(image_or_tag, "short_id") else self.client.images.get(image_or_tag)
+            references = [image_or_tag] if isinstance(image_or_tag, str) else (img.tags or [])
+            if any(reference in AVAILABLE_IMAGES.values() for reference in references):
+                version = "main"
             short = img.short_id
             if short.startswith("sha256:"):
                 short = short[len("sha256:"):]

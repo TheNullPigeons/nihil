@@ -31,25 +31,25 @@ class TestShortImageName:
     """Nom court pour l'affichage."""
 
     def test_known_full_returns_full(self):
-        assert short_image_name("ghcr.io/thenullpigeons/full:latest") == "full"
+        assert short_image_name("ghcr.io/thenullpigeons/full:latest") == "full:main"
 
     def test_known_full_flock_returns_full(self):
         assert short_image_name("ghcr.io/thenullpigeons/full:flock") == "full"
 
     def test_known_ad_returns_ad(self):
-        assert short_image_name("ghcr.io/thenullpigeons/ad:latest") == "ad"
+        assert short_image_name("ghcr.io/thenullpigeons/ad:latest") == "ad:main"
 
     def test_known_ad_nest_returns_ad(self):
         assert short_image_name("ghcr.io/thenullpigeons/ad:nest") == "ad"
 
     def test_known_web_returns_web(self):
-        assert short_image_name("ghcr.io/thenullpigeons/web:latest") == "web"
+        assert short_image_name("ghcr.io/thenullpigeons/web:latest") == "web:main"
 
     def test_known_web_beak_returns_web(self):
         assert short_image_name("ghcr.io/thenullpigeons/web:beak") == "web"
 
     def test_known_blueteam_returns_blueteam(self):
-        assert short_image_name("ghcr.io/thenullpigeons/blueteam:latest") == "blueteam"
+        assert short_image_name("ghcr.io/thenullpigeons/blueteam:latest") == "blueteam:main"
 
     def test_known_blueteam_coo_returns_blueteam(self):
         assert short_image_name("ghcr.io/thenullpigeons/blueteam:coo") == "blueteam"
@@ -59,6 +59,33 @@ class TestShortImageName:
 
     def test_unknown_no_slash_unchanged(self):
         assert short_image_name("localonly") == "localonly"
+
+
+@pytest.mark.parametrize("reference,tags,expected", [
+    ("ghcr.io/thenullpigeons/full:latest", [], "main"),
+    (None, ["nihil/full:dev", "ghcr.io/thenullpigeons/full:latest"], "main"),
+    (None, ["ghcr.io/thenullpigeons/full:dev", "ghcr.io/thenullpigeons/full:latest"], "main"),
+    ("ghcr.io/thenullpigeons/full:dev", ["ghcr.io/thenullpigeons/full:latest"], "dev"),
+    (None, ["ghcr.io/thenullpigeons/full:dev"], "dev"),
+    (None, ["nihil/full:dev"], "dev"),
+    (None, ["ghcr.io/alice/full:latest"], "dev"),
+])
+def test_promoted_image_display_uses_main_without_changing_build_version(reference, tags, expected):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from nihil.manager import NihilManager
+
+    image = SimpleNamespace(
+        tags=tags, short_id="sha256:abc123def456",
+        attrs={"Config": {"Labels": {"org.nihil.version": "dev"}}},
+    )
+    manager = NihilManager.__new__(NihilManager)
+    manager.client = Mock()
+    manager.client.images.get.return_value = image
+    manager.AVAILABLE_IMAGES = {"full": "ghcr.io/thenullpigeons/full:dev"}
+    target = reference or image
+    assert manager.get_image_display_version(target) == f"{expected} @abc123def456"
+    assert manager.get_image_version(target) == "dev"
 
 
 def test_inventory_and_container_status_do_not_depend_on_active_source():
