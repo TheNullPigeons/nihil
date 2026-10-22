@@ -297,15 +297,21 @@ class ImageSourceManager:
     def trigger_build(
         self, *, variant: str = "all", wait: bool = False,
         progress_callback=None, cancel_event=None,
-    ) -> None:
-        """Trigger the Docker workflow on the active personal branch."""
+    ) -> tuple[str, str]:
+        """Trigger the Docker workflow for the active source and return its repo/ref."""
         if variant not in {"all", "full", "ad", "web", "blueteam"}:
             raise ImageSourceError("Unknown image variant. Choose all, full, ad, web, or blueteam.")
-        repo = self.config.personal_image_repo
-        branch = self.config.personal_image_branch
-        if not repo or not branch:
-            raise ImageSourceError("No personal fork is configured.")
-        self._enable_actions(repo)
+        if self.config.image_source_active == "upstream":
+            repo = self.upstream_repo
+            branch = self.config.image_channel
+        elif self.config.image_source_active == "personal":
+            repo = self.config.personal_image_repo
+            branch = self.config.personal_image_branch
+            if not repo or not branch:
+                raise ImageSourceError("No personal fork is configured.")
+            self._enable_actions(repo)
+        else:
+            raise ImageSourceError("Unknown source. Choose 'upstream' or 'personal'.")
         if progress_callback:
             progress_callback(0, 0, "Dispatching GitHub Actions")
         dispatch_started = datetime.now(timezone.utc)
@@ -348,6 +354,7 @@ class ImageSourceManager:
                     "The workflow was dispatched, but its new run ID could not be found."
                 )
             self._watch_build(run_id, repo, progress_callback, cancel_event)
+        return repo, branch
 
     def _watch_build(self, run_id: str, repo: str, progress_callback=None, cancel_event=None) -> None:
         """Follow a GitHub Actions run with a step-based progress bar."""

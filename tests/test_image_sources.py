@@ -238,9 +238,17 @@ def test_distant_cleanup_ignores_missing_branch(tmp_path):
     assert sum("packages/container" in command[-1] for command in calls) == 4
 
 
-def test_trigger_build_dispatches_and_can_wait(tmp_path):
+@pytest.mark.parametrize("source,channel,repo,branch", [
+    ("personal", "dev", "alice/nihil-images", "nihil/web-custom"),
+    ("personal", "main", "alice/nihil-images", "nihil/web-custom"),
+    ("upstream", "main", "TheNullPigeons/nihil-images", "main"),
+    ("upstream", "dev", "TheNullPigeons/nihil-images", "dev"),
+])
+def test_trigger_build_dispatches_and_can_wait(tmp_path, source, channel, repo, branch):
     config = SimpleNamespace(
         image_sources_home=tmp_path,
+        image_source_active=source,
+        image_channel=channel,
         personal_image_repo="alice/nihil-images",
         personal_image_branch="nihil/web-custom",
     )
@@ -257,12 +265,69 @@ def test_trigger_build_dispatches_and_can_wait(tmp_path):
         return ""
 
     manager._run = fake_run
-    manager.trigger_build(wait=True)
+    assert manager.trigger_build(wait=True) == (repo, branch)
     assert [
         "gh", "workflow", "run", "docker-build.yml",
-        "--repo", "alice/nihil-images", "--ref", "nihil/web-custom", "-f", "variant=all",
+        "--repo", repo, "--ref", branch, "-f", "variant=all",
     ] in calls
-    assert ["gh", "run", "watch", "12345", "--repo", "alice/nihil-images", "--exit-status"] in calls
+    assert ["gh", "run", "watch", "12345", "--repo", repo, "--exit-status"] in calls
+    assert any("actions/permissions" in " ".join(call) for call in calls) == (source == "personal")
+
+
+def test_upstream_build_uses_configured_repository_without_a_personal_fork(tmp_path):
+    config = SimpleNamespace(
+        image_sources_home=tmp_path, image_source_active="upstream", image_channel="dev",
+        _get=lambda *args: "acme/security-images",
+    )
+    manager = ImageSourceManager(config)
+    manager._run = MagicMock(return_value="")
+
+    assert manager.trigger_build(variant="web") == ("acme/security-images", "dev")
+    manager._run.assert_called_once_with([
+        "gh", "workflow", "run", "docker-build.yml",
+        "--repo", "acme/security-images", "--ref", "dev", "-f", "variant=web",
+    ])
+
+
+@pytest.mark.parametrize("missing", ["personal_image_repo", "personal_image_branch"])
+def test_personal_build_requires_a_configured_fork(tmp_path, missing):
+    config = SimpleNamespace(
+        image_sources_home=tmp_path, image_source_active="personal",
+        personal_image_repo="alice/nihil-images", personal_image_branch="nihil/web-custom",
+    )
+    setattr(config, missing, None)
+    manager = ImageSourceManager(config)
+    manager._run = MagicMock()
+
+    with pytest.raises(ImageSourceError, match="No personal fork"):
+        manager.trigger_build()
+    manager._run.assert_not_called()
+
+
+@pytest.mark.parametrize("source,repo,branch", [
+    ("upstream", "TheNullPigeons/nihil-images", "dev"),
+    ("personal", "alice/nihil-images", "nihil/web-custom"),
+])
+def test_build_confirmation_reports_actual_target(tmp_path, monkeypatch, capsys, source, repo, branch):
+    from nihil.cli.controller import NihilController
+
+    controller = NihilController.__new__(NihilController)
+    controller.config = SimpleNamespace(
+        image_sources_home=tmp_path, image_source_active=source, image_channel="dev",
+        personal_image_repo="alice/nihil-images", personal_image_branch="nihil/web-custom",
+    )
+    controller.formatter = MagicMock()
+    controller.formatter.success.side_effect = lambda message: message
+    run = MagicMock(return_value="")
+    monkeypatch.setattr(ImageSourceManager, "_run", run)
+
+    args = create_parser().parse_args(["image", "build", "full"])
+    assert controller._cmd_image(args) == 0
+    assert f"Docker build workflow dispatched for {repo}:{branch}" in capsys.readouterr().out
+    assert [
+        "gh", "workflow", "run", "docker-build.yml",
+        "--repo", repo, "--ref", branch, "-f", "variant=full",
+    ] in [call.args[0] for call in run.call_args_list]
 
 
 def test_workflow_progress_tracks_github_steps():
@@ -282,6 +347,7 @@ def test_workflow_progress_tracks_github_steps():
 def test_trigger_build_reports_progress_to_web_ui(tmp_path):
     config = SimpleNamespace(
         image_sources_home=tmp_path,
+        image_source_active="personal",
         personal_image_repo="alice/nihil-images",
         personal_image_branch="nihil/web-custom",
     )

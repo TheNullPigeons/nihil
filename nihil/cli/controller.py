@@ -1850,11 +1850,10 @@ class NihilController:
             if action == "customize":
                 return self._customize_image(args, manager)
             if action == "build":
-                manager.trigger_build(variant=args.variant or "all", wait=args.wait)
+                repo, branch = manager.trigger_build(variant=args.variant or "all", wait=args.wait)
                 state = "completed" if args.wait else "dispatched"
                 print(self.formatter.success(
-                    f"Docker build workflow {state} for {manager.config.personal_image_repo}:"
-                    f"{manager.config.personal_image_branch}"
+                    f"Docker build workflow {state} for {repo}:{branch}"
                 ))
                 print(self.formatter.info("Use 'nihil install <variant>' when the workflow has finished."))
                 return 0

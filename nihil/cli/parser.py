@@ -99,7 +99,7 @@ Examples:
     channel_parser.add_argument("channel", choices=["main", "dev"], nargs="?", help="Channel to use (omit to show current channel)")
     image_subparsers.add_parser("status", help="Show configured upstream and personal image sources")
     build_image_parser = image_subparsers.add_parser(
-        "build", help="Trigger Docker builds on the active personal image branch"
+        "build", help="Build the active image source (upstream channel or personal branch)"
     )
     build_image_parser.add_argument(
         "variant", choices=["all", "full", "ad", "web", "blueteam"], nargs="?", default=None,
