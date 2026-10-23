@@ -43,6 +43,23 @@ class TestMainEntryPoint:
 
         banner.assert_not_called()
 
+    def test_info_containers_only_skips_image_queries(self, capsys):
+        from nihil.cli.controller import NihilController
+
+        controller = object.__new__(NihilController)
+        controller.manager = MagicMock()
+        controller.manager.list_containers.return_value = []
+        controller.formatter = MagicMock()
+        controller.formatter.section_header.return_value = "CONTAINERS"
+
+        assert controller._cmd_info(SimpleNamespace(containers=True)) == 0
+
+        output = capsys.readouterr().out
+        assert "CONTAINERS" in output
+        assert "No nihil containers found." in output
+        assert "AVAILABLE IMAGE VARIANTS" not in output
+        controller.manager.list_images.assert_not_called()
+
 
 class TestUpgradeContainerState:
     @pytest.mark.parametrize("status", ["running", "exited"])

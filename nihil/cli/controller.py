@@ -1566,6 +1566,8 @@ class NihilController:
         return 0
 
     def _cmd_info(self, args) -> int:
+        if getattr(args, "containers", False):
+            return self._print_containers_list()
         container_name = getattr(args, "container", None)
         if container_name:
             self.manager = self.manager or NihilManager()
@@ -1620,6 +1622,9 @@ class NihilController:
         else:
             print("  No nihil images installed locally.")
             print("  Use 'nihil start <name> --image <variant>' to pull and use an image.")
+        return self._print_containers_list()
+
+    def _print_containers_list(self) -> int:
         print(self.formatter.section_header("CONTAINERS", "🐳"))
         containers = self.manager.list_containers()
         if containers:

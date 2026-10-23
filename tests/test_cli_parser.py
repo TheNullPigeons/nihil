@@ -31,11 +31,15 @@ class TestCreateParser:
         args = parser.parse_args(["info"])
         assert args.command == "info"
 
-    def test_parse_info_with_container(self):
-        parser = create_parser()
-        args = parser.parse_args(["info", "--container", "demo"])
-        assert args.command == "info"
+    def test_legacy_info_short_container_argument(self):
+        args = create_parser().parse_args(["info", "-c", "demo"])
         assert args.container == "demo"
+        assert args.containers is False
+
+    @pytest.mark.parametrize("option", ["-c", "--containers"])
+    def test_parse_info_containers_only(self, option):
+        args = create_parser().parse_args(["info", option])
+        assert args.containers is True
 
     def test_parse_start_minimal(self):
         parser = create_parser()

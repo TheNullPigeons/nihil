@@ -12,6 +12,14 @@ except Exception:
     argcomplete = None
 
 
+class _ContainerOptionAction(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        if values is None:
+            namespace.containers = True
+        else:
+            namespace.container = values
+
+
 def create_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="nihil",
@@ -58,8 +66,13 @@ Examples:
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     subparsers = parser.add_subparsers(dest="command", help="Available commands", metavar="COMMAND")
 
-    info_parser = subparsers.add_parser("info", help="Display information about images and containers")
-    info_parser.add_argument("--container", "-c", metavar="NAME", help="Show detailed information for a specific container")
+    info_parser = subparsers.add_parser("info", help="Display information about images and containers", allow_abbrev=False)
+    info_options = info_parser.add_mutually_exclusive_group()
+    info_options.add_argument(
+        "-c", "--containers", nargs="?", const=None, metavar="NAME", action=_ContainerOptionAction,
+        help="Show only containers; pass NAME for that container's details",
+    )
+    info_parser.set_defaults(containers=False, container=None)
 
     # Backward-compatible alias; omitted from help in favor of `nihil image list`.
     subparsers.add_parser("images")
