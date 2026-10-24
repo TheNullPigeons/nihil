@@ -1622,7 +1622,7 @@ class NihilController:
         else:
             print("  No nihil images installed locally.")
             print("  Use 'nihil start <name> --image <variant>' to pull and use an image.")
-        return self._print_containers_list()
+        return 0 if getattr(args, "images", False) else self._print_containers_list()
 
     def _print_containers_list(self) -> int:
         print(self.formatter.section_header("CONTAINERS", "🐳"))

@@ -72,7 +72,8 @@ Examples:
         "-c", "--containers", nargs="?", const=None, metavar="NAME", action=_ContainerOptionAction,
         help="Show only containers; pass NAME for that container's details",
     )
-    info_parser.set_defaults(containers=False, container=None)
+    info_options.add_argument("-i", "--images", action="store_true", help="Show only images")
+    info_parser.set_defaults(containers=False, images=False, container=None)
 
     # Backward-compatible alias; omitted from help in favor of `nihil image list`.
     subparsers.add_parser("images")
