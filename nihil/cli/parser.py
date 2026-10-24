@@ -53,13 +53,15 @@ Examples:
   nihil image customize               Select tools for a personal image branch
   nihil image customize full --git-del
                                       Recreate the local clone and reuse its remote branch
-  nihil image build full               Trigger a build for the full image only
-  nihil image build full --wait       Trigger a full-image build and wait for completion
-  nihil image build --wait             Trigger builds for all image variants and wait
   nihil image switch upstream          Use the upstream nihil-images source
   nihil image switch personal          Use the personal fork source
   nihil image channel dev              Pull upstream development images
   nihil image channel main             Return to stable upstream images
+  nihil build full                   Build the active remote source locally with Docker
+  nihil build                         Show only major Docker build steps
+  nihil build -v                      Show complete Docker build output
+  nihil build ad --source owner/repo --ref dev
+                                      Clone a remote branch and build it locally
 
         """
     )
@@ -112,17 +114,10 @@ Examples:
     channel_parser = image_subparsers.add_parser("channel", help="Select upstream image channel")
     channel_parser.add_argument("channel", choices=["main", "dev"], nargs="?", help="Channel to use (omit to show current channel)")
     image_subparsers.add_parser("status", help="Show configured upstream and personal image sources")
-    build_image_parser = image_subparsers.add_parser(
-        "build", help="Build the active image source (upstream channel or personal branch)"
-    )
-    build_image_parser.add_argument(
-        "variant", choices=["all", "full", "ad", "web", "blueteam"], nargs="?", default=None,
-        help="Image variant to build (default: all)",
-    )
-    build_image_parser.add_argument(
-        "--wait", action="store_true", help="Wait until the GitHub Actions build finishes"
-    )
-
+    image_build = image_subparsers.add_parser("build", help="Trigger a GitHub Actions image build")
+    image_build.add_argument("variant", choices=["all", "full", "ad", "web", "blueteam"], nargs="?", default="all", help="Image variant to build (default: all)")
+    image_build.add_argument("--wait", action="store_true", help="Wait until the GitHub Actions build finishes")
+    image_build.add_argument("--web", action="store_true", help="Follow the GitHub Actions build in a local browser page")
     subparsers.add_parser("version", help="Display Nihil version")
 
     subparsers.add_parser("doctor", help="Run diagnostics checks (Docker, image, environment)")
@@ -195,7 +190,7 @@ Examples:
     install_parser.add_argument("image", nargs="?", default=None, metavar="VARIANT", help="Image variant to install (full|ad|web|blueteam). If not specified, prompted to select.")
 
     uninstall_parser = subparsers.add_parser("uninstall", help="Remove nihil images")
-    uninstall_parser.add_argument("names", nargs="*", help="Image name(s)")
+    uninstall_parser.add_argument("names", nargs="*", help="Image name(s) or numbered selections/ranges (e.g. 2-10,12-14)")
     uninstall_parser.add_argument("--unused", action="store_true", help="Remove only Nihil images unused by any container, including stopped containers")
     uninstall_parser.add_argument("--force", "-f", action="store_true", help="Force removal (with --unused: skip confirmation only)")
 
@@ -229,10 +224,17 @@ Examples:
     config_parser = subparsers.add_parser("config", help="Show or edit the Nihil configuration file")
     config_parser.add_argument("--edit", "-e", action="store_true", help="Open the config file in $EDITOR")
 
-    build_parser = subparsers.add_parser("build", help="Build a nihil image locally from source")
+    build_parser = subparsers.add_parser(
+        "build", help="Build a nihil image locally, optionally showing progress in a browser",
+        description=("Build locally with Docker. By default, use build.images_path or the current "
+                     "nihil-images checkout; otherwise clone the active remote source and branch."),
+    )
     build_parser.add_argument("variant", choices=["full", "ad", "blueteam", "web", "test"], nargs="?", default="full", help="Image variant to build (default: full)")
-    build_parser.add_argument("--source", "-s", metavar="PATH", default=None, help="Path to nihil-images source directory (overrides config)")
+    build_parser.add_argument("--source", "-s", metavar="PATH|REPO", default=None, help="Local source directory or remote Git repository (overrides configured source)")
+    build_parser.add_argument("--ref", metavar="REF", default=None, help="Remote branch or tag (default: active source branch/channel)")
     build_parser.add_argument("--no-cache", action="store_true", help="Pass --no-cache to docker build")
+    build_parser.add_argument("--verbose", "-v", action="store_true", help="Show complete Docker build output (default: major steps only)")
+    build_parser.add_argument("--web", action="store_true", help="Show local Docker build progress in a browser")
     build_parser.add_argument("--tag", "-t", metavar="TAG", default=None, help="Custom image tag (default: nihil/<variant>:local)")
     build_parser.add_argument("--log", "-l", metavar="FILE", default=None, help="Write build output to a log file (use 'tail -f FILE' to follow)")
 

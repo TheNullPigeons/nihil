@@ -40,6 +40,23 @@ def _workflow_progress(run: dict) -> tuple[int, int, str]:
     return completed, max(len(steps), 1), label
 
 
+def _workflow_job_url(run: dict, repo: str, run_id: str) -> str:
+    """Link to the active job, or the failed/completed job when the run ends."""
+    jobs = run.get("jobs") or []
+    job = next((job for job in jobs if job.get("status") == "in_progress"), None)
+    if job is None:
+        job = next((job for job in jobs if job.get("conclusion") == "failure"), None)
+    if job is None:
+        job = next((job for job in jobs if job.get("status") == "queued"), None)
+    if job is None and jobs:
+        job = jobs[-1]
+    return (
+        f"https://github.com/{repo}/actions/runs/{run_id}/job/{job['databaseId']}"
+        if job and job.get("databaseId")
+        else f"https://github.com/{repo}/actions/runs/{run_id}"
+    )
+
+
 class ImageSourceManager:
     """Prepare the upstream repository and a personal nihil-images fork."""
 
@@ -53,7 +70,7 @@ class ImageSourceManager:
     @staticmethod
     def _normalize_repo(value: str) -> str:
         raw = value.strip().rstrip("/")
-        if raw.startswith(("https://", "http://")):
+        if raw.startswith(("https://", "http://", "ssh://")):
             raw = urlparse(raw).path.strip("/")
         if raw.endswith(".git"):
             raw = raw[:-4]
@@ -276,14 +293,8 @@ class ImageSourceManager:
             upstream_repo=self.upstream_repo,
         )
 
-    def ensure_upstream(self) -> Path:
+    def activate_upstream(self) -> None:
         path = self.config.image_sources_upstream_path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        upstream_url = f"https://github.com/{self.upstream_repo}.git"
-        if not (path / ".git").is_dir():
-            self._run(["git", "clone", upstream_url, str(path)])
-        else:
-            self._run(["git", "pull", "--ff-only"], cwd=path)
         self.config.set_image_source(
             active="upstream",
             path=path,
@@ -292,7 +303,6 @@ class ImageSourceManager:
             upstream_path=path,
             upstream_repo=self.upstream_repo,
         )
-        return path
 
     def trigger_build(
         self, *, variant: str = "all", wait: bool = False,
@@ -384,7 +394,7 @@ class ImageSourceManager:
                     self._run(["gh", "run", "cancel", run_id, "--repo", repo])
                     cancel_sent = True
                     label = "Cancellation requested"
-                update(completed, total, label, run.get("url") or "")
+                update(completed, total, label, _workflow_job_url(run, repo, run_id))
                 if run.get("status") != "completed":
                     time.sleep(3)
             return run
@@ -403,7 +413,7 @@ class ImageSourceManager:
                     task, completed=completed, total=total, description=label
                 ))
 
-        url = run.get("url") or f"https://github.com/{repo}/actions/runs/{run_id}"
+        url = _workflow_job_url(run, repo, run_id)
         if progress_callback:
             completed, total, _ = _workflow_progress(run)
             logs = ""
@@ -431,7 +441,7 @@ class ImageSourceManager:
         if self.formatter:
             print(self.formatter.info(f"GitHub Actions: {url}"))
 
-    def switch(self, source: str) -> Path:
+    def switch(self, source: str) -> Path | None:
         if source == "personal":
             path = self.config.personal_image_path
             if not path or not (path / ".git").is_dir():
@@ -449,5 +459,6 @@ class ImageSourceManager:
             )
             return path
         if source == "upstream":
-            return self.ensure_upstream()
+            self.activate_upstream()
+            return None
         raise ImageSourceError("Unknown source. Choose 'upstream' or 'personal'.")

@@ -198,7 +198,7 @@ class NihilManager:
         return None
 
     def snapshot_local_image_as_version(self, image_tag: str) -> Optional[str]:
-        """Avant un pull qui va écraser le tag courant, retag l'image locale comme nihil/<variant>:<version>.
+        """Avant un pull, conserve l'image sous nihil/<variant>:<version>-<image-id>.
 
         Permet de conserver une référence nommée vers l'ancienne version au lieu de la rendre dangling.
         Retourne le nouveau tag créé, ou None si rien à faire.
@@ -223,19 +223,21 @@ class NihilManager:
         if not safe_version:
             return None
 
-        new_tag = f"nihil/{variant}:{safe_version}"
+        image_id = img.short_id.split(":")[-1]
+        new_tag_suffix = f"{safe_version}-{image_id}"
+        new_tag = f"nihil/{variant}:{new_tag_suffix}"
         if new_tag in (img.tags or []):
             return new_tag
         try:
-            img.tag(repository=f"nihil/{variant}", tag=safe_version)
+            img.tag(repository=f"nihil/{variant}", tag=new_tag_suffix)
             return new_tag
         except docker.errors.APIError:
             return None
 
-    def _pull_with_progress(self, image: str) -> None:
+    def _pull_with_progress(self, image: str) -> Optional[str]:
         # Préserve une référence nommée vers l'image locale courante avant de pull
         # (sinon elle deviendrait dangling quand le tag :latest sera réassigné).
-        self.snapshot_local_image_as_version(image)
+        snapshot_tag = self.snapshot_local_image_as_version(image)
         from rich.progress import (
             Progress,
             BarColumn,
@@ -292,6 +294,7 @@ class NihilManager:
                     status=status,
                     completed=current if current else (totals[layer_id] if status in ("Pull complete", "Already exists") else None),
                 )
+        return snapshot_tag
 
     def container_exists(self, name: str) -> bool:
         try:

@@ -42,11 +42,12 @@ def test_image_commands_are_available():
     assert channel.image_action == "channel"
     assert channel.channel == "dev"
 
-    build = parser.parse_args(["image", "build", "web", "--wait"])
-    assert build.image_action == "build"
-    assert build.variant == "web"
-    assert build.wait is True
-
+    image_build = parser.parse_args(["image", "build", "web", "--wait", "--web"])
+    assert image_build.image_action == "build"
+    assert image_build.variant == "web"
+    assert image_build.wait is True
+    assert image_build.web is True
+    assert parser.parse_args(["image", "build"]).variant == "all"
 
 def test_repository_urls_are_normalized(tmp_path):
     config = SimpleNamespace(image_sources_home=tmp_path)
@@ -362,13 +363,18 @@ def test_trigger_build_reports_progress_to_web_ui(tmp_path):
                 return "complete build log"
             return json.dumps({
                 "status": "completed", "conclusion": "success", "url": "https://github.test/run/42",
-                "jobs": [{"status": "completed", "steps": [{"name": "Build", "status": "completed"}]}],
+                "jobs": [{"databaseId": 77, "status": "completed", "steps": [
+                    {"name": "Build", "status": "completed"}
+                ]}],
             })
         return ""
 
     manager._run = fake_run
     manager.trigger_build(wait=True, progress_callback=lambda *update: updates.append(update))
-    assert updates[-1] == (1, 1, "Build logs ready", "https://github.test/run/42", "complete build log")
+    assert updates[-1] == (
+        1, 1, "Build logs ready",
+        "https://github.com/alice/nihil-images/actions/runs/42/job/77", "complete build log",
+    )
 
 
 def test_completed_build_retries_until_logs_are_available(tmp_path, monkeypatch):
@@ -525,7 +531,14 @@ def test_customization_only_activates_source_on_success(tmp_path, monkeypatch, a
     monkeypatch.setattr("rich.prompt.Confirm.ask", lambda *a, **kw: True)
     git = Mock()
     if outcome == "push_failure":
-        git.side_effect = [None, None, subprocess.CalledProcessError(1, ["git", "push"])]
+        git.side_effect = [
+            None,
+            subprocess.CompletedProcess(["git", "diff"], 1),
+            None,
+            subprocess.CalledProcessError(1, ["git", "push"]),
+        ]
+    elif outcome == "push":
+        git.side_effect = [None, subprocess.CompletedProcess(["git", "diff"], 1), None, None]
     monkeypatch.setattr(subprocess, "run", git)
     args = create_parser().parse_args(["image", "customize", "web"] +
                                       (["--no-push"] if outcome == "save_local" else []))
@@ -571,10 +584,11 @@ def test_web_customization_pushes_and_builds_without_terminal_confirmation(tmp_p
     controller._select_tools_web = select_web
     monkeypatch.setattr("rich.prompt.Confirm.ask", Mock(side_effect=AssertionError("unexpected prompt")))
     git = Mock()
+    git.side_effect = [None, subprocess.CompletedProcess(["git", "diff"], 1), None, None]
     monkeypatch.setattr(subprocess, "run", git)
 
     args = create_parser().parse_args(["image", "customize", "web", "--web"])
     assert controller._customize_image(args, source) == 0
     source.activate_personal.assert_called_once_with(path, "alice/nihil-images", "nihil/web-custom")
     source.trigger_build.assert_called_once()
-    assert git.call_count == 3
+    assert git.call_count == 4

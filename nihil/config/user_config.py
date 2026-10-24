@@ -43,6 +43,10 @@ _DEFAULT_CONFIG: dict = {
     "updates": {
         "auto_check": True,
     },
+    "nihil_history": {
+        "sync_credentials": True,
+        "sync_hosts": True,
+    },
     "build": {
         "images_path": None,  # path to nihil-images source directory
     },
@@ -76,6 +80,8 @@ _CONFIG_COMMENT = """\
 # display.x11_by_default      : enable X11 forwarding by default
 # display.wayland_by_default  : enable Wayland socket forwarding by default
 # updates.auto_check          : check for image updates on start
+# nihil_history.sync_credentials: import credentials from NXC/Nmap into nihil-history
+# nihil_history.sync_hosts     : import hosts from NXC/Nmap into nihil-history
 # build.images_path           : path to nihil-images source directory (for nihil build)
 # image_sources.active         : upstream | personal
 # image_sources.channel        : main | dev (upstream images)
@@ -220,6 +226,14 @@ class NihilConfig:
     def auto_check_updates(self) -> bool:
         val = self._get("updates", "auto_check")
         return val if val is not None else True
+
+    @property
+    def nihil_history_sync_credentials(self) -> bool:
+        return bool(self._get("nihil_history", "sync_credentials"))
+
+    @property
+    def nihil_history_sync_hosts(self) -> bool:
+        return bool(self._get("nihil_history", "sync_hosts"))
 
     # ------------------------------------------------------------------
     # Propriétés: build

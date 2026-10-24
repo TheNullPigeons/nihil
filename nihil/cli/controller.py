@@ -51,6 +51,51 @@ class NihilController:
             results = executor.map(self.manager.check_image_available, tags)
         return dict(zip(tags, results))
 
+    def _image_source_label(self, image):
+        source = self.manager.get_image_source(image)
+        if source != "local":
+            return source
+        version = self.manager.get_image_labels(image).get("org.nihil.version")
+        return "Local_build" if version == "local" else "old_upstream"
+
+    def _image_display_name(self, image):
+        short_id = image.short_id.split(":")[-1]
+        is_old_upstream = self._image_source_label(image) == "old_upstream"
+        names = []
+        for tag in image.tags or []:
+            name = self.manager.short_image_name(tag)
+            if is_old_upstream and tag.startswith("nihil/") and not tag.endswith(f"-{short_id}"):
+                name += f"-{short_id}"
+            names.append(name)
+        if names:
+            return ", ".join(names)
+        if is_old_upstream:
+            labels = self.manager.get_image_labels(image)
+            variant = labels.get("org.nihil.variant")
+            version = labels.get("org.nihil.version")
+            if variant and version:
+                return f"{variant}:{version}-{short_id}"
+        return image.short_id
+
+    @staticmethod
+    def _parse_image_selection(selection: str, count: int) -> List[int]:
+        """Parse numbered image selections such as ``2-10,12-14`` (1-based)."""
+        indexes = []
+        for part in selection.split(","):
+            bounds = part.split("-", 1)
+            if not all(bound.isdigit() for bound in bounds) or len(bounds) > 2:
+                raise ValueError(f"Invalid image selection: {selection}")
+            start = int(bounds[0])
+            end = int(bounds[-1])
+            if start < 1 or end < start or end > count:
+                raise ValueError(f"Image selection out of range: {part}")
+            indexes.extend(range(start - 1, end))
+        return list(dict.fromkeys(indexes))
+
+    @staticmethod
+    def _is_numbered_image_selection(value: str) -> bool:
+        return bool(value) and all(char.isdigit() or char in ",-" for char in value)
+
     def _format_image_status(self, image_tag, registry_status):
         """Décrit à la fois la disponibilité distante et l'état de la copie locale."""
         if image_tag.startswith("nihil/"):
@@ -463,6 +508,10 @@ class NihilController:
             environment = self._parse_env_args(getattr(args, "env", None))
             if environment is None:
                 return 1
+            environment.update({
+                "NIHIL_HISTORY_SYNC_CREDENTIALS": str(int(self.config.nihil_history_sync_credentials)),
+                "NIHIL_HISTORY_SYNC_HOSTS": str(int(self.config.nihil_history_sync_hosts)),
+            })
             container = self.manager.create_container(
                 name=container_name,
                 image=image,
@@ -917,13 +966,11 @@ class NihilController:
 
             # Identifier les containers utilisant actuellement cette image (avant pull)
             old_id = None
-            old_version = None
             old_display_version = None
             affected_containers: List[str] = []
             try:
                 old_img = self.manager.client.images.get(image_tag)
                 old_id = old_img.short_id
-                old_version = self.manager.get_image_version(old_img)
                 old_display_version = self.manager.get_image_display_version(old_img)
                 # Containers utilisant cette image (running ou stopped)
                 all_containers = self.manager.client.containers.list(all=True)
@@ -935,9 +982,7 @@ class NihilController:
 
             print(self.formatter.info(f"Updating '{variant}' ({image_tag})..."))
             try:
-                # _pull_with_progress retag automatiquement l'image locale courante
-                # comme nihil/<variant>:<old_version> avant de récupérer la nouvelle.
-                self.manager._pull_with_progress(image_tag)
+                snapshot_tag = self.manager._pull_with_progress(image_tag)
                 new_img = self.manager.client.images.get(image_tag)
                 new_id = new_img.short_id
                 new_version = self.manager.get_image_version(new_img)
@@ -952,9 +997,9 @@ class NihilController:
                     elif new_display_version:
                         transition = f" (now {new_display_version})"
                     print(self.formatter.success(f"'{variant}' updated successfully{transition}."))
-                    if old_version:
+                    if snapshot_tag:
                         print(self.formatter.info(
-                            f"Previous image preserved as 'nihil/{variant}:{old_version}'."
+                            f"Previous image preserved as '{snapshot_tag}'."
                         ))
                     if affected_containers:
                         containers_to_upgrade.extend(affected_containers)
@@ -1396,27 +1441,46 @@ class NihilController:
             if not images_list:
                 print("No installed nihil images found.")
                 return 0
-            from rich.prompt import IntPrompt
             print(self.formatter.info("Select image(s) to uninstall:"))
             choices_map = []
             rows = []
             for i, img in enumerate(images_list):
-                tags_raw = img.tags if img.tags else []
-                short = ", ".join(self.manager.short_image_name(t) for t in tags_raw) or img.short_id
+                short = self._image_display_name(img)
+                source = self._image_source_label(img)
                 size = f"{img.attrs['Size'] / (1024**3):.2f} GB"
                 image_ref = img.tags[0] if img.tags else img.id
                 choices_map.append(image_ref)
-                rows.append([str(i+1), short, size])
-            self.formatter.print_table(["#", "IMAGE", "SIZE"], rows)
+                rows.append([str(i+1), short, source, size])
+            self.formatter.print_table(["#", "IMAGE", "SOURCE", "SIZE"], rows)
             try:
-                choice = IntPrompt.ask("Select an image number", choices=[str(k) for k in range(1, len(images_list) + 1)], default=1)
-                selected_image = choices_map[choice - 1]
-                resolved_images.append(selected_image)
+                selection = input(self.formatter.info("Select image number(s) (e.g. 2-10,12-14): ")) or "1"
+                resolved_images.extend(choices_map[i] for i in self._parse_image_selection(selection, len(images_list)))
+            except ValueError as exc:
+                print(self.formatter.error(str(exc)), file=sys.stderr)
+                return 1
             except (KeyboardInterrupt, EOFError):
                 print("\nAborted.")
                 return 0
         else:
+            has_numeric_selection = any(self._is_numbered_image_selection(item) for item in raw_images)
+            images_list = self.manager.list_images() if has_numeric_selection else []
+            if has_numeric_selection:
+                rows = [[str(i + 1), self._image_display_name(img), self._image_source_label(img),
+                         f"{img.attrs['Size'] / (1024**3):.2f} GB"] for i, img in enumerate(images_list)]
+                self.formatter.print_table(["#", "IMAGE", "SOURCE", "SIZE"], rows)
             for item in raw_images:
+                if self._is_numbered_image_selection(item):
+                    if not images_list:
+                        images_list = self.manager.list_images()
+                    try:
+                        resolved_images.extend(
+                            images_list[i].tags[0] if images_list[i].tags else images_list[i].id
+                            for i in self._parse_image_selection(item, len(images_list))
+                        )
+                    except ValueError as exc:
+                        print(self.formatter.error(str(exc)), file=sys.stderr)
+                        return 1
+                    continue
                 if item in self.manager.AVAILABLE_IMAGES:
                     resolved_images.append(self.manager.AVAILABLE_IMAGES[item])
                 elif item in ["nihil-ad", "nihil-ad:latest"]:
@@ -1424,8 +1488,15 @@ class NihilController:
                 elif item in ["nihil", "nihil:latest"]:
                     resolved_images.append(self.manager.AVAILABLE_IMAGES.get("full"))
                 else:
-                    resolved_images.append(item)
-        images = resolved_images
+                    if not images_list:
+                        images_list = self.manager.list_images()
+                    matches = [img for img in images_list
+                               if item in [self._image_display_name(img), *(self.manager.short_image_name(tag) for tag in img.tags or [])]]
+                    if len(matches) > 1:
+                        print(self.formatter.error(f"Image name is ambiguous: {item}"), file=sys.stderr)
+                        return 1
+                    resolved_images.append((matches[0].tags[0] if matches[0].tags else matches[0].id) if matches else item)
+        images = list(dict.fromkeys(resolved_images))
         # Map each image ref to its local id so we can match containers robustly.
         image_ids = {}
         for image in images:
@@ -1607,7 +1678,7 @@ class NihilController:
             rows = []
             for img in images:
                 tags = img.tags if img.tags else []
-                short = ", ".join(self.manager.short_image_name(t) for t in tags) or img.short_id
+                short = self._image_display_name(img)
                 version = self.manager.get_image_display_version(img) or "-"
                 size = f"{img.attrs['Size'] / (1024**3):.2f} GB"
                 users = image_usage.get(img.id, []) if image_usage is not None else []
@@ -1617,7 +1688,7 @@ class NihilController:
                     usage = ("Used", self.formatter.GREEN)
                 else:
                     usage = ("Unused", self.formatter.YELLOW)
-                rows.append([short, self.formatter.image_source(self.manager.get_image_source(img)), version, size, usage])
+                rows.append([short, self.formatter.image_source(self._image_source_label(img)), version, size, usage])
             self.formatter.print_table(["IMAGE", "SOURCE", "VERSION", "SIZE", "USAGE"], rows, [40, 18, 30, 12, 9])
         else:
             print("  No nihil images installed locally.")
@@ -1719,7 +1790,27 @@ class NihilController:
 
     def _cmd_build(self, args) -> int:
         import subprocess
+        import select
+        import tempfile
+        import re
         from datetime import datetime, timezone
+
+        def build_time() -> str:
+            return datetime.now().strftime("%H:%M:%S")
+
+        def build_timestamp() -> str:
+            return self.formatter._colorize(f"[{build_time()}]", self.formatter.CYAN)
+
+        def build_error(message: str) -> str:
+            return self.formatter._colorize(f"[{build_time()}] [-] {message}", self.formatter.RED)
+
+        def build_success(message: str) -> str:
+            return self.formatter._colorize(f"[{build_time()}] [+] {message}", self.formatter.GREEN)
+
+        def build_info(label: str, detail: str, color: str) -> str:
+            marker = self.formatter._colorize("[*]", self.formatter.BLUE)
+            label = self.formatter._colorize(f"{label}:", color)
+            return f"{build_timestamp()} {marker} {label} {detail}"
 
         DOCKERFILES = {
             "full":     "Dockerfile",
@@ -1731,28 +1822,227 @@ class NihilController:
 
         variant = args.variant or "full"
 
+        if getattr(args, "web", False):
+            import copy
+            import io
+            import contextlib
+            from nihil.features.tool_selector_web import select_tools_web
+
+            local_args = copy.copy(args)
+            local_args.web = False
+            local_args.verbose = True
+            result = {}
+            phase_buffer = ""
+            phase_state = {"completed": 0, "total": 0, "label": "Preparing local Docker build", "last_action": ""}
+            action_names = {
+                "package_base": "Base system", "install_core_tools": "Core tools",
+                "healthcheck": "Healthcheck", "filter_tools_json": "Tool manifest",
+                "post_install": "Final cleanup", "install_mod_ad": "Active Directory tools",
+                "install_mod_c2": "C2 tools", "install_mod_web": "Web tools",
+                "install_mod_osint": "OSINT tools", "install_mod_pwn": "Pwn tools",
+                "install_mod_network": "Network tools", "install_mod_credential": "Credential tools",
+                "install_mod_misc": "Miscellaneous tools", "install_mod_reverse": "Reverse engineering tools",
+                "install_mod_crypto": "Crypto tools", "install_mod_forensics": "Forensics tools",
+                "install_mod_hunt": "Threat hunting tools", "install_mod_dfir": "DFIR tools",
+                "install_mod_wordlists": "Wordlists",
+            }
+
+            def run_local_build(_selection, report, cancel_event):
+                captured = ""
+
+                class BuildOutput(io.TextIOBase):
+                    def write(self, text):
+                        nonlocal captured, phase_buffer
+                        if not text:
+                            return 0
+                        captured = (captured + text)[-2_000_000:]
+                        phase_buffer += re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", text)
+                        lines = phase_buffer.splitlines(keepends=True)
+                        phase_buffer = ""
+                        if lines and not lines[-1].endswith(("\n", "\r")):
+                            phase_buffer = lines.pop()
+                        for line in lines:
+                            plan = re.search(r"Build plan:\s*(\d+) phases", line)
+                            if plan:
+                                phase_state["total"] = int(plan.group(1))
+                                phase_state["label"] = f"Build plan · {plan.group(1)} phases"
+                            step = re.search(r"Starting build step:\s*([\w]+)", line)
+                            if step and step.group(1) != phase_state["last_action"]:
+                                phase_state["last_action"] = step.group(1)
+                                phase_state["completed"] = min(
+                                    phase_state["completed"] + 1,
+                                    max(phase_state["total"] - 1, 0),
+                                )
+                                phase_state["label"] = action_names.get(step.group(1), step.group(1))
+                            setup = re.search(r"\[internal\] (load build definition|load metadata for|load build context)", line)
+                            if setup:
+                                phase_state["label"] = {
+                                    "load build definition": "Loading Dockerfile",
+                                    "load metadata for": "Resolving base image",
+                                    "load build context": "Preparing build context",
+                                }[setup.group(1)]
+                            docker_step = re.search(r"\[(\d+)/(\d+)\] (.+)$", line)
+                            if docker_step and not step:
+                                _, _, label = docker_step.groups()
+                                phase_state["label"] = "Starting Nihil build phases" if "./entrypoint.sh" in label else label
+                        report(phase_state["completed"], phase_state["total"], phase_state["label"], logs=captured)
+                        return len(text)
+
+                    def flush(self):
+                        pass
+
+                output = BuildOutput()
+                local_args._web_cancel_event = cancel_event
+                with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+                    result["code"] = self._cmd_build(local_args)
+                if result["code"]:
+                    if cancel_event.is_set():
+                        result["code"] = 130
+                        class LocalBuildCancelled(RuntimeError):
+                            cancelled = True
+
+                        raise LocalBuildCancelled("Local Docker build cancelled.")
+                    raise RuntimeError(f"Local Docker build failed with exit code {result['code']}.")
+                report(1, 1, "Build complete", logs=captured)
+
+            try:
+                select_tools_web(
+                    [], set(), f"Local Docker build · {variant}",
+                    on_save=run_local_build, action_label="Start build",
+                    start_immediately=True, page_context="Nihil · Local Docker",
+                    page_title="Building your local image…",
+                    success_title="Local build complete",
+                    initial_label="Preparing local Docker build",
+                    plain_logs=True,
+                    can_cancel=True,
+                )
+                return result.get("code", 1)
+            except RuntimeError as exc:
+                print(build_error(str(exc)), file=sys.stderr)
+                return result.get("code", 1)
+
         raw_source = getattr(args, "source", None) or self.config.images_path
+        remote_ref = getattr(args, "ref", None)
+        temp_source = None
+        if not raw_source and (remote_ref or not (Path.cwd() / "build" / "entrypoint.sh").is_file()):
+            from nihil.features.image_sources import ImageSourceManager
+
+            sources = ImageSourceManager(self.config, self.formatter)
+            if self.config.image_source_active == "upstream":
+                raw_source = sources.upstream_repo
+                remote_ref = remote_ref or self.config.image_channel
+            elif self.config.image_source_active == "personal":
+                raw_source = self.config.personal_image_repo
+                remote_ref = remote_ref or self.config.personal_image_branch
+                if not raw_source or not remote_ref:
+                    print(build_error("No personal image repository and branch are configured."), file=sys.stderr)
+                    return 1
+            else:
+                print(build_error("Unknown source. Choose 'upstream' or 'personal'."), file=sys.stderr)
+                return 1
         if raw_source:
+            raw_source = str(raw_source)
             source = Path(raw_source).expanduser().resolve()
+            is_remote = raw_source.startswith(("https://", "http://", "ssh://", "git@")) or (
+                not source.exists() and re.fullmatch(r"[\w.-]+/[\w.-]+", raw_source) is not None
+            )
+            if is_remote:
+                if re.fullmatch(r"[\w.-]+/[\w.-]+", raw_source):
+                    raw_source = f"https://github.com/{raw_source.removesuffix('.git')}.git"
+                temp_source = tempfile.TemporaryDirectory(prefix="nihil-build-")
+                source = Path(temp_source.name) / "nihil-images"
+                clone_cmd = ["git", "clone", "--depth", "1"]
+                if remote_ref:
+                    clone_cmd.extend(["--branch", remote_ref])
+                clone_cmd.extend([raw_source, str(source)])
+                print(self.formatter.info(f"Cloning image source {raw_source}..."))
+                try:
+                    with self._loading("Cloning image source..."):
+                        subprocess.run(
+                            clone_cmd, check=True, text=True, capture_output=True,
+                            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+                        )
+                except (FileNotFoundError, subprocess.CalledProcessError) as exc:
+                    if temp_source:
+                        temp_source.cleanup()
+                    detail = getattr(exc, "stderr", "") or str(exc)
+                    print(build_error(f"Could not clone image source: {detail.strip()}"), file=sys.stderr)
+                    return 1
+            elif remote_ref:
+                print(build_error("--ref can only be used with a remote Git source."), file=sys.stderr)
+                return 1
         else:
+            if remote_ref:
+                print(build_error("--ref can only be used with a remote Git source."), file=sys.stderr)
+                return 1
             cwd = Path.cwd()
             if (cwd / "build" / "entrypoint.sh").is_file():
                 source = cwd
             else:
-                print(self.formatter.error(
+                print(build_error(
                     "Run this command from the nihil-images directory, or set the path once:\n"
                     "  nihil build --source /path/to/nihil-images\n"
                     "  nihil config --edit  →  build.images_path: /path/to/nihil-images"
                 ), file=sys.stderr)
                 return 1
         if not source.is_dir():
-            print(self.formatter.error(f"Source directory not found: {source}"), file=sys.stderr)
+            if temp_source:
+                temp_source.cleanup()
+            print(build_error(f"Source directory not found: {source}"), file=sys.stderr)
             return 1
 
         dockerfile = source / DOCKERFILES[variant]
         if not dockerfile.is_file():
-            print(self.formatter.error(f"Dockerfile not found: {dockerfile}"), file=sys.stderr)
+            if temp_source:
+                temp_source.cleanup()
+            print(build_error(f"Dockerfile not found: {dockerfile}"), file=sys.stderr)
             return 1
+
+        build_actions = re.findall(
+            r"\./entrypoint\.sh\s+(package_base|install_[\w]+|healthcheck|filter_tools_json|post_install)\b",
+            dockerfile.read_text(encoding="utf-8"),
+        )
+        module_labels = {
+            "core_tools": "Core tools", "ad": "AD tools", "c2": "C2 tools",
+            "web": "Web tools", "osint": "OSINT tools", "pwn": "Pwn tools",
+            "network": "Network tools", "credential": "Credential tools",
+            "misc": "Misc tools", "reverse": "Reverse tools", "crypto": "Crypto tools",
+            "forensics": "Forensics tools", "hunt": "Threat hunting tools",
+            "dfir": "DFIR tools", "wordlists": "Wordlists",
+        }
+        action_files = {
+            "package_base": source / "build/modules/base.sh",
+            "healthcheck": source / "build/lib/healthcheck.sh",
+            "filter_tools_json": source / "build/lib/healthcheck.sh",
+            "post_install": source / "build/modules/post_install.sh",
+        }
+        step_labels = []
+        action_log_prefixes = {}
+        for action in build_actions:
+            if action == "package_base":
+                step_labels.append("Base system")
+            elif action.startswith("install_"):
+                module = action.removeprefix("install_").removeprefix("mod_")
+                step_labels.append(module_labels.get(module, f"{module.replace('_', ' ').title()} tools"))
+                action_files[action] = source / f"build/modules/{action.removeprefix('install_')}.sh"
+            elif action == "healthcheck":
+                step_labels.append("Healthcheck")
+            elif action == "filter_tools_json":
+                step_labels.append("Tool manifest")
+            else:
+                step_labels.append("Final cleanup")
+            action_file = action_files.get(action)
+            if action_file and action_file.is_file():
+                contents = action_file.read_text(encoding="utf-8")
+                function = re.search(rf"(?m)^function\s+{re.escape(action)}\s*\(\)\s*\{{", contents)
+                if function:
+                    body = contents[function.end():]
+                    next_function = re.search(r"(?m)^function\s+", body)
+                    if next_function:
+                        body = body[:next_function.start()]
+                    message = re.search(r'(?m)^\s*colorecho\s+"([^"]+)"', body)
+                    if message:
+                        action_log_prefixes[action] = message.group(1).split("$", 1)[0].strip()
 
         tag = getattr(args, "tag", None) or f"nihil/{variant}:local"
         build_date = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -1771,19 +2061,91 @@ class NihilController:
             cmd.extend(["--platform", image_platform])
         if getattr(args, "no_cache", False):
             cmd.append("--no-cache")
+        verbose = getattr(args, "verbose", False)
+        if not verbose:
+            cmd.extend(["--progress", "plain"])
         cmd.append(str(source))
 
         log_path = getattr(args, "log", None)
+        cancel_event = getattr(args, "_web_cancel_event", None)
 
-        print(self.formatter.info(f"Building variant '{variant}' -> {tag}"))
-        print(self.formatter.info(f"Source: {source}"))
-        print(self.formatter.info(f"Dockerfile: {DOCKERFILES[variant]}"))
+        module_count = sum(action.startswith("install_") for action in build_actions)
+        print(build_info("Building variant", f"'{variant}' -> {tag}", self.formatter.CYAN))
+        print(build_info("Build plan", f"{len(step_labels)} phases ({module_count} modules)", self.formatter.BLUE))
+        print(build_info("Source", str(source), self.formatter.GREEN))
+        print(build_info("Dockerfile", DOCKERFILES[variant], self.formatter.MAGENTA))
         if log_path:
-            print(self.formatter.info(f"Build log: {log_path}  (tail -f {log_path})"))
+            print(build_info("Build log", f"{log_path}  (tail -f {log_path})", self.formatter.CYAN))
         print()
 
         log_file = open(log_path, "a", buffering=1) if log_path else None
         returncode = 0
+        pending_output = ""
+        log_pending = ""
+        verbose_pending = ""
+        completed_steps = 0
+        active_step = None
+        next_step_index = 0
+        ansi_escape = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+
+        def emit_timestamped(text: str, pending: str, stream, *, colored: bool = False, final: bool = False) -> str:
+            pending += text
+            lines = pending.splitlines(keepends=True)
+            pending = ""
+            if lines and not lines[-1].endswith(("\n", "\r")) and not final:
+                pending = lines.pop()
+            for line in lines:
+                stamp = build_timestamp() if colored else f"[{build_time()}]"
+                stream.write(f"{stamp} {line}")
+            stream.flush()
+            return pending
+
+        def complete_build_step() -> None:
+            if active_step:
+                print(build_success(f"Phase {completed_steps}/{len(step_labels)}: {active_step}"))
+
+        def start_build_step(action: str) -> None:
+            nonlocal active_step, completed_steps, next_step_index
+            try:
+                index = build_actions.index(action, next_step_index)
+            except ValueError:
+                return
+            complete_build_step()
+            completed_steps = index + 1
+            next_step_index = index + 1
+            active_step = step_labels[index]
+            print(build_info(f"Phase {completed_steps}/{len(step_labels)}", active_step, self.formatter.YELLOW))
+
+        def show_build_step(line: str) -> None:
+            line = ansi_escape.sub("", line.rstrip("\r\n"))
+            setup = re.match(r"^#(\d+) \[internal\] (load build definition|load metadata for|load build context)", line)
+            if setup:
+                labels = {
+                    "load build definition": "Load Dockerfile",
+                    "load metadata for": "Resolve base image",
+                    "load build context": "Prepare build context",
+                }
+                label = next(name for prefix, name in labels.items() if setup.group(2).startswith(prefix))
+                print(build_info("Setup", label, self.formatter.CYAN))
+                return
+            docker_step = re.match(r"^#(\d+) \[(\d+)/(\d+)\] (.*)", line)
+            if docker_step:
+                number, index, total, label = docker_step.groups()
+                if label.startswith("RUN"):
+                    label = "RUN Nihil build phases" if "./entrypoint.sh" in label else "RUN prepare runtime"
+                print(build_info(f"Dockerfile {index}/{total}", label, self.formatter.MAGENTA))
+                return
+            marker = re.search(r"\[NIHIL\]\s+Starting build step:\s+([\w]+)", line)
+            if marker:
+                start_build_step(marker.group(1))
+                return
+            for action, prefix in action_log_prefixes.items():
+                if prefix and f"[NIHIL] {prefix}" in line:
+                    start_build_step(action)
+                    return
+            if re.search(r"(?:\[NIHIL ERROR\]|\bERROR:|\berror:|failed to solve:)", line, re.IGNORECASE):
+                print(build_error(line), file=sys.stderr)
+
         try:
             proc = subprocess.Popen(
                 cmd,
@@ -1791,27 +2153,61 @@ class NihilController:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
             )
+            termination_sent = False
             while True:
+                if cancel_event and cancel_event.is_set() and proc.poll() is None and not termination_sent:
+                    proc.terminate()
+                    termination_sent = True
+                if cancel_event:
+                    ready, _, _ = select.select([proc.stdout], [], [], 0.25)
+                    if not ready:
+                        continue
                 chunk = proc.stdout.read1(4096)
                 if not chunk:
                     break
                 text = chunk.decode("utf-8", errors="replace")
-                sys.stdout.write(text)
-                sys.stdout.flush()
                 if log_file:
-                    log_file.write(text)
+                    log_pending = emit_timestamped(text, log_pending, log_file)
+                if verbose:
+                    verbose_pending = emit_timestamped(text, verbose_pending, sys.stdout, colored=True)
+                    continue
+                pending_output += text
+                lines = pending_output.splitlines(keepends=True)
+                pending_output = ""
+                if lines and not lines[-1].endswith(("\n", "\r")):
+                    pending_output = lines.pop()
+                for line in lines:
+                    show_build_step(line)
+            if pending_output:
+                show_build_step(pending_output)
+            if log_file and log_pending:
+                emit_timestamped("", log_pending, log_file, final=True)
+            if verbose_pending:
+                emit_timestamped("", verbose_pending, sys.stdout, colored=True, final=True)
             proc.wait()
             returncode = proc.returncode
         finally:
             if log_file:
                 log_file.close()
+            if temp_source:
+                temp_source.cleanup()
         if returncode != 0:
-            print(self.formatter.error(f"Build failed (exit {returncode})."), file=sys.stderr)
+            if cancel_event and cancel_event.is_set():
+                print(build_info("Build", "Stop requested; Docker build terminated", self.formatter.YELLOW))
+                return 130
+            if active_step:
+                print(build_error(f"Phase {completed_steps}/{len(step_labels)} failed: {active_step}"), file=sys.stderr)
+            print(build_error(f"Build failed (exit {returncode})."), file=sys.stderr)
             return returncode
 
+        if active_step:
+            complete_build_step()
+        elif step_labels:
+            print(build_info("Build", "Docker reused the cached steps", self.formatter.CYAN))
+
         print()
-        print(self.formatter.success(f"Build complete: {tag}"))
-        print(self.formatter.info(f"Start a container: nihil start mytest --image {variant}"))
+        print(build_success(f"Build complete: {tag}"))
+        print(build_info("Next", f"Start a container with nihil start mytest --image {variant}", self.formatter.CYAN))
         return 0
 
     # ------------------------------------------------------------------
@@ -1834,7 +2230,7 @@ class NihilController:
             print(f"Active source:     {self.formatter.image_source(self.config.image_source_active)}")
             print(f"Upstream channel:  {self.config.image_channel}")
             print(f"Upstream repo:     {manager.upstream_repo}")
-            print(f"Upstream path:     {self.config.image_sources_upstream_path}")
+            print("Upstream checkout: cloned on demand")
             print(f"Personal path:     {self.config.personal_image_path or '-'}")
             print(f"Personal repo:     {self.config.personal_image_repo or '-'}")
             print(f"Personal branch:   {self.config.personal_image_branch or '-'}")
@@ -1842,6 +2238,37 @@ class NihilController:
 
         if action == "list":
             return self._cmd_images()
+
+        if action == "build":
+            try:
+                if args.web:
+                    from nihil.features.tool_selector_web import select_tools_web
+
+                    def run_github_build(_selection, report, cancel_event):
+                        manager.trigger_build(
+                            variant=args.variant, wait=True,
+                            progress_callback=report, cancel_event=cancel_event,
+                        )
+
+                    select_tools_web(
+                        [], set(), f"GitHub Actions build · {args.variant}",
+                        on_save=run_github_build, start_immediately=True,
+                        can_cancel=True, page_context="Nihil · GitHub Actions",
+                        page_title="Building your image…",
+                        success_title="Image build complete",
+                        initial_label="Dispatching GitHub Actions",
+                    )
+                    print(self.formatter.success(f"Image build finished: {args.variant}"))
+                    return 0
+
+                repo, branch = manager.trigger_build(variant=args.variant, wait=args.wait)
+                print(self.formatter.success(
+                    f"Docker build workflow dispatched for {repo}:{branch}"
+                ))
+                return 0
+            except RuntimeError as exc:
+                print(self.formatter.error(str(exc)), file=sys.stderr)
+                return 1
 
         if action == "channel":
             if args.channel:
@@ -1856,19 +2283,16 @@ class NihilController:
             if action == "switch":
                 path = manager.switch(args.source)
                 print(self.formatter.success(f"Active image source: {self.formatter.image_source(args.source)}"))
-                print(self.formatter.info(f"Source path: {path}"))
+                if path:
+                    print(self.formatter.info(f"Source path: {path}"))
+                else:
+                    print(self.formatter.info(
+                        f"Source: {manager.upstream_repo}@{self.config.image_channel} (cloned on demand for local builds)"
+                    ))
                 return 0
 
             if action == "customize":
                 return self._customize_image(args, manager)
-            if action == "build":
-                repo, branch = manager.trigger_build(variant=args.variant or "all", wait=args.wait)
-                state = "completed" if args.wait else "dispatched"
-                print(self.formatter.success(
-                    f"Docker build workflow {state} for {repo}:{branch}"
-                ))
-                print(self.formatter.info("Use 'nihil install <variant>' when the workflow has finished."))
-                return 0
         except ImageSourceError as exc:
             print(self.formatter.error(str(exc)), file=sys.stderr)
             return 1
@@ -1987,6 +2411,21 @@ class NihilController:
             )
             return len(enabled)
 
+        def push_selection() -> None:
+            selection_file = "build/config/tool-selection.json"
+            subprocess.run(["git", "add", selection_file], cwd=path, check=True)
+            changed = subprocess.run(
+                ["git", "diff", "--cached", "--quiet", "--", selection_file], cwd=path,
+            )
+            if changed.returncode == 1:
+                subprocess.run(
+                    ["git", "commit", "-m", f"Customize {args.variant} image tools", "--", selection_file],
+                    cwd=path, check=True,
+                )
+                subprocess.run(["git", "push", "--set-upstream", "origin", branch], cwd=path, check=True)
+            elif changed.returncode != 0:
+                raise subprocess.CalledProcessError(changed.returncode, changed.args)
+
         if getattr(args, "web", False):
             def apply_and_build(selected: set[str], report, cancel_event) -> None:
                 report(0, 0, "Saving tool selection")
@@ -1996,13 +2435,7 @@ class NihilController:
                     report(1, 1, "Customization saved locally")
                     return
                 report(0, 0, f"Committing and pushing {branch}")
-                subprocess.run(["git", "add", "build/config/tool-selection.json"], cwd=path, check=True)
-                subprocess.run(
-                    ["git", "commit", "-m", f"Customize {args.variant} image tools"],
-                    cwd=path,
-                    check=True,
-                )
-                subprocess.run(["git", "push", "--set-upstream", "origin", branch], cwd=path, check=True)
+                push_selection()
                 source_manager.activate_personal(path, fork_repo, branch)
                 source_manager.trigger_build(
                     variant=args.variant, wait=True, progress_callback=report,
@@ -2048,13 +2481,7 @@ class NihilController:
             if Confirm.ask(f"Commit and push {branch} to {fork_repo}?", default=True):
                 try:
                     with self._loading(f"Pushing {branch} to {fork_repo}..."):
-                        subprocess.run(["git", "add", "build/config/tool-selection.json"], cwd=path, check=True)
-                        subprocess.run(
-                            ["git", "commit", "-m", f"Customize {args.variant} image tools"],
-                            cwd=path,
-                            check=True,
-                        )
-                        subprocess.run(["git", "push", "--set-upstream", "origin", branch], cwd=path, check=True)
+                        push_selection()
                 except subprocess.CalledProcessError as exc:
                     print(self.formatter.error(f"Git operation failed (exit {exc.returncode})."), file=sys.stderr)
                     return exc.returncode or 1

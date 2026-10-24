@@ -523,9 +523,10 @@ class TestNihilManager:
                 assert manager.get_image_version("nihil/full:local") is None
 
     def test_snapshot_local_image_retags_before_pull(self, mock_docker_client):
-        """snapshot_local_image_as_version retag l'image locale comme nihil/<variant>:<version>."""
+        """snapshot_local_image_as_version donne un tag unique avec l'identifiant de l'image."""
         mock_image = MagicMock()
         mock_image.tags = ["ghcr.io/thenullpigeons/full:latest"]
+        mock_image.short_id = "sha256:abc123def456"
         mock_image.attrs = {"Config": {"Labels": {"org.nihil.version": "1.0.0", "org.nihil.variant": "full"}}}
         mock_docker_client.images.get.return_value = mock_image
 
@@ -534,8 +535,8 @@ class TestNihilManager:
                 manager = NihilManager()
                 new_tag = manager.snapshot_local_image_as_version("ghcr.io/thenullpigeons/full:latest")
 
-                assert new_tag == "nihil/full:1.0.0"
-                mock_image.tag.assert_called_once_with(repository="nihil/full", tag="1.0.0")
+                assert new_tag == "nihil/full:1.0.0-abc123def456"
+                mock_image.tag.assert_called_once_with(repository="nihil/full", tag="1.0.0-abc123def456")
 
     def test_snapshot_local_image_skips_when_no_version(self, mock_docker_client):
         """snapshot_local_image_as_version ne fait rien si pas de label version."""
@@ -613,12 +614,13 @@ class TestNihilManager:
     def test_snapshot_local_image_idempotent(self, mock_docker_client):
         """snapshot_local_image_as_version ne re-tag pas si le tag existe déjà."""
         mock_image = MagicMock()
-        mock_image.tags = ["ghcr.io/thenullpigeons/full:latest", "nihil/full:1.0.0"]
+        mock_image.tags = ["ghcr.io/thenullpigeons/full:latest", "nihil/full:1.0.0-abc123def456"]
+        mock_image.short_id = "sha256:abc123def456"
         mock_image.attrs = {"Config": {"Labels": {"org.nihil.version": "1.0.0"}}}
         mock_docker_client.images.get.return_value = mock_image
 
         with patch('nihil.manager.manager.docker.from_env', return_value=mock_docker_client):
             with patch('nihil.manager.manager.ensure_filesystem'):
                 manager = NihilManager()
-                assert manager.snapshot_local_image_as_version("ghcr.io/thenullpigeons/full:latest") == "nihil/full:1.0.0"
+                assert manager.snapshot_local_image_as_version("ghcr.io/thenullpigeons/full:latest") == "nihil/full:1.0.0-abc123def456"
                 mock_image.tag.assert_not_called()
