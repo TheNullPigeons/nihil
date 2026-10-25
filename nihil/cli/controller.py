@@ -588,9 +588,10 @@ class NihilController:
                 title = f"Nihil Session {timestamp}"
                 self.manager.exec_in_container(container, "mkdir -p /workspace/logs")
                 print(self.formatter.info(f"Logging session to {logfile}"))
+                recorded_command = f"NIHIL_SESSION_RECORDING=1 {command}"
                 command = (
                     "asciinema rec -i 2 --stdin --quiet "
-                    f"--command {shlex.quote(command)} "
+                    f"--command {shlex.quote(recorded_command)} "
                     f"--title {shlex.quote(title)} {shlex.quote(logfile)}"
                 )
             env_list = container.attrs.get("Config", {}).get("Env") or []

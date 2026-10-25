@@ -34,6 +34,16 @@ def test_managed_start_launches_openvpn():
     )
 
 
+def test_logged_shell_sets_recording_prompt_flag(controller):
+    args = create_parser().parse_args(["start", "box", "--log"])
+
+    assert controller._cmd_start(args) == 0
+
+    command = controller.manager.exec_in_container.call_args.args[1]
+    assert "asciinema rec" in command
+    assert "--command 'NIHIL_SESSION_RECORDING=1 zsh'" in command
+
+
 @pytest.fixture
 def controller(monkeypatch):
     ctrl = object.__new__(NihilController)
