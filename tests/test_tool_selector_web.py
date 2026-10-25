@@ -44,6 +44,10 @@ def test_web_selector_validates_selection_and_escapes_html():
     assert "View live logs on GitHub" in progress_page
     assert "Cancel build" in progress_page
     assert "Complete build logs" in progress_page
+    assert "height:calc(100vh - 365px)" in progress_page
+    assert "IBM Plex Sans" in progress_page
+    assert "function renderLogs" in progress_page
+    assert "log-error" in progress_page
 
 
 def test_web_selector_serves_and_accepts_selection(monkeypatch):

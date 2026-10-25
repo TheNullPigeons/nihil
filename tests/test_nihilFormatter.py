@@ -78,6 +78,11 @@ class TestNihilFormatter:
         
         assert "[*]" in result
         assert formatter.BLUE in result
+        assert f"{formatter.RESET} Information" in result
+        assert f"{formatter.BLUE}Information" not in result
+
+        result = formatter.info("Setup: Load Dockerfile")
+        assert f"{formatter.BLUE}[*] Setup:{formatter.RESET} Load Dockerfile" == result
     
     def test_warning_with_colors(self):
         """Test warning() avec couleurs"""

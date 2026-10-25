@@ -42,11 +42,12 @@ def test_image_commands_are_available():
     assert channel.image_action == "channel"
     assert channel.channel == "dev"
 
-    build = parser.parse_args(["image", "build", "web", "--wait"])
-    assert build.image_action == "build"
-    assert build.variant == "web"
-    assert build.wait is True
-
+    image_build = parser.parse_args(["image", "build", "web", "--wait", "--web"])
+    assert image_build.image_action == "build"
+    assert image_build.variant == "web"
+    assert image_build.wait is True
+    assert image_build.web is True
+    assert parser.parse_args(["image", "build"]).variant == "all"
 
 def test_repository_urls_are_normalized(tmp_path):
     config = SimpleNamespace(image_sources_home=tmp_path)
@@ -238,9 +239,17 @@ def test_distant_cleanup_ignores_missing_branch(tmp_path):
     assert sum("packages/container" in command[-1] for command in calls) == 4
 
 
-def test_trigger_build_dispatches_and_can_wait(tmp_path):
+@pytest.mark.parametrize("source,channel,repo,branch", [
+    ("personal", "dev", "alice/nihil-images", "nihil/web-custom"),
+    ("personal", "main", "alice/nihil-images", "nihil/web-custom"),
+    ("upstream", "main", "TheNullPigeons/nihil-images", "main"),
+    ("upstream", "dev", "TheNullPigeons/nihil-images", "dev"),
+])
+def test_trigger_build_dispatches_and_can_wait(tmp_path, source, channel, repo, branch):
     config = SimpleNamespace(
         image_sources_home=tmp_path,
+        image_source_active=source,
+        image_channel=channel,
         personal_image_repo="alice/nihil-images",
         personal_image_branch="nihil/web-custom",
     )
@@ -257,12 +266,69 @@ def test_trigger_build_dispatches_and_can_wait(tmp_path):
         return ""
 
     manager._run = fake_run
-    manager.trigger_build(wait=True)
+    assert manager.trigger_build(wait=True) == (repo, branch)
     assert [
         "gh", "workflow", "run", "docker-build.yml",
-        "--repo", "alice/nihil-images", "--ref", "nihil/web-custom", "-f", "variant=all",
+        "--repo", repo, "--ref", branch, "-f", "variant=all",
     ] in calls
-    assert ["gh", "run", "watch", "12345", "--repo", "alice/nihil-images", "--exit-status"] in calls
+    assert ["gh", "run", "watch", "12345", "--repo", repo, "--exit-status"] in calls
+    assert any("actions/permissions" in " ".join(call) for call in calls) == (source == "personal")
+
+
+def test_upstream_build_uses_configured_repository_without_a_personal_fork(tmp_path):
+    config = SimpleNamespace(
+        image_sources_home=tmp_path, image_source_active="upstream", image_channel="dev",
+        _get=lambda *args: "acme/security-images",
+    )
+    manager = ImageSourceManager(config)
+    manager._run = MagicMock(return_value="")
+
+    assert manager.trigger_build(variant="web") == ("acme/security-images", "dev")
+    manager._run.assert_called_once_with([
+        "gh", "workflow", "run", "docker-build.yml",
+        "--repo", "acme/security-images", "--ref", "dev", "-f", "variant=web",
+    ])
+
+
+@pytest.mark.parametrize("missing", ["personal_image_repo", "personal_image_branch"])
+def test_personal_build_requires_a_configured_fork(tmp_path, missing):
+    config = SimpleNamespace(
+        image_sources_home=tmp_path, image_source_active="personal",
+        personal_image_repo="alice/nihil-images", personal_image_branch="nihil/web-custom",
+    )
+    setattr(config, missing, None)
+    manager = ImageSourceManager(config)
+    manager._run = MagicMock()
+
+    with pytest.raises(ImageSourceError, match="No personal fork"):
+        manager.trigger_build()
+    manager._run.assert_not_called()
+
+
+@pytest.mark.parametrize("source,repo,branch", [
+    ("upstream", "TheNullPigeons/nihil-images", "dev"),
+    ("personal", "alice/nihil-images", "nihil/web-custom"),
+])
+def test_build_confirmation_reports_actual_target(tmp_path, monkeypatch, capsys, source, repo, branch):
+    from nihil.cli.controller import NihilController
+
+    controller = NihilController.__new__(NihilController)
+    controller.config = SimpleNamespace(
+        image_sources_home=tmp_path, image_source_active=source, image_channel="dev",
+        personal_image_repo="alice/nihil-images", personal_image_branch="nihil/web-custom",
+    )
+    controller.formatter = MagicMock()
+    controller.formatter.success.side_effect = lambda message: message
+    run = MagicMock(return_value="")
+    monkeypatch.setattr(ImageSourceManager, "_run", run)
+
+    args = create_parser().parse_args(["image", "build", "full"])
+    assert controller._cmd_image(args) == 0
+    assert f"Docker build workflow dispatched for {repo}:{branch}" in capsys.readouterr().out
+    assert [
+        "gh", "workflow", "run", "docker-build.yml",
+        "--repo", repo, "--ref", branch, "-f", "variant=full",
+    ] in [call.args[0] for call in run.call_args_list]
 
 
 def test_workflow_progress_tracks_github_steps():
@@ -282,6 +348,7 @@ def test_workflow_progress_tracks_github_steps():
 def test_trigger_build_reports_progress_to_web_ui(tmp_path):
     config = SimpleNamespace(
         image_sources_home=tmp_path,
+        image_source_active="personal",
         personal_image_repo="alice/nihil-images",
         personal_image_branch="nihil/web-custom",
     )
@@ -296,13 +363,34 @@ def test_trigger_build_reports_progress_to_web_ui(tmp_path):
                 return "complete build log"
             return json.dumps({
                 "status": "completed", "conclusion": "success", "url": "https://github.test/run/42",
-                "jobs": [{"status": "completed", "steps": [{"name": "Build", "status": "completed"}]}],
+                "jobs": [{"databaseId": 77, "status": "completed", "steps": [
+                    {"name": "Build", "status": "completed"}
+                ]}],
             })
         return ""
 
     manager._run = fake_run
     manager.trigger_build(wait=True, progress_callback=lambda *update: updates.append(update))
-    assert updates[-1] == (1, 1, "Build logs ready", "https://github.test/run/42", "complete build log")
+    assert updates[-1] == (
+        1, 1, "Build logs ready",
+        "https://github.com/alice/nihil-images/actions/runs/42/job/77", "complete build log",
+    )
+
+
+def test_completed_build_retries_until_logs_are_available(tmp_path, monkeypatch):
+    manager = ImageSourceManager(SimpleNamespace(image_sources_home=tmp_path))
+    logs = iter(["", "complete build log"])
+    updates = []
+
+    def fake_run(command, **kwargs):
+        if "--log" in command:
+            return next(logs)
+        return json.dumps({"status": "completed", "conclusion": "success", "jobs": []})
+
+    manager._run = fake_run
+    monkeypatch.setattr("nihil.features.image_sources.time.sleep", lambda _: None)
+    manager._watch_build("42", "alice/nihil-images", lambda *update: updates.append(update))
+    assert updates[-1][-1] == "complete build log"
 
 
 def test_web_build_can_be_cancelled(tmp_path, monkeypatch):
@@ -443,7 +531,14 @@ def test_customization_only_activates_source_on_success(tmp_path, monkeypatch, a
     monkeypatch.setattr("rich.prompt.Confirm.ask", lambda *a, **kw: True)
     git = Mock()
     if outcome == "push_failure":
-        git.side_effect = [None, None, subprocess.CalledProcessError(1, ["git", "push"])]
+        git.side_effect = [
+            None,
+            subprocess.CompletedProcess(["git", "diff"], 1),
+            None,
+            subprocess.CalledProcessError(1, ["git", "push"]),
+        ]
+    elif outcome == "push":
+        git.side_effect = [None, subprocess.CompletedProcess(["git", "diff"], 1), None, None]
     monkeypatch.setattr(subprocess, "run", git)
     args = create_parser().parse_args(["image", "customize", "web"] +
                                       (["--no-push"] if outcome == "save_local" else []))
@@ -489,10 +584,11 @@ def test_web_customization_pushes_and_builds_without_terminal_confirmation(tmp_p
     controller._select_tools_web = select_web
     monkeypatch.setattr("rich.prompt.Confirm.ask", Mock(side_effect=AssertionError("unexpected prompt")))
     git = Mock()
+    git.side_effect = [None, subprocess.CompletedProcess(["git", "diff"], 1), None, None]
     monkeypatch.setattr(subprocess, "run", git)
 
     args = create_parser().parse_args(["image", "customize", "web", "--web"])
     assert controller._customize_image(args, source) == 0
     source.activate_personal.assert_called_once_with(path, "alice/nihil-images", "nihil/web-custom")
     source.trigger_build.assert_called_once()
-    assert git.call_count == 3
+    assert git.call_count == 4

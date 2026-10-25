@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import time
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 
@@ -161,6 +162,7 @@ class NihilManager:
         Pour les release tags (v1.2.3), retourne la version telle quelle car le tag git
         est déjà unique. Pour une ref mouvante (main, dev), suffixe avec @<short_id>
         pour distinguer plusieurs builds successifs de la même branche.
+        Une référence upstream :latest est affichée main, même après promotion depuis dev.
         """
         version = self.get_image_version(image_or_tag)
         if not version:
@@ -169,6 +171,9 @@ class NihilManager:
             return version
         try:
             img = image_or_tag if hasattr(image_or_tag, "short_id") else self.client.images.get(image_or_tag)
+            references = [image_or_tag] if isinstance(image_or_tag, str) else (img.tags or [])
+            if any(reference in AVAILABLE_IMAGES.values() for reference in references):
+                version = "main"
             short = img.short_id
             if short.startswith("sha256:"):
                 short = short[len("sha256:"):]
@@ -193,7 +198,7 @@ class NihilManager:
         return None
 
     def snapshot_local_image_as_version(self, image_tag: str) -> Optional[str]:
-        """Avant un pull qui va écraser le tag courant, retag l'image locale comme nihil/<variant>:<version>.
+        """Avant un pull, conserve l'image sous nihil/<variant>:<version>-<image-id>.
 
         Permet de conserver une référence nommée vers l'ancienne version au lieu de la rendre dangling.
         Retourne le nouveau tag créé, ou None si rien à faire.
@@ -218,19 +223,21 @@ class NihilManager:
         if not safe_version:
             return None
 
-        new_tag = f"nihil/{variant}:{safe_version}"
+        image_id = img.short_id.split(":")[-1]
+        new_tag_suffix = f"{safe_version}-{image_id}"
+        new_tag = f"nihil/{variant}:{new_tag_suffix}"
         if new_tag in (img.tags or []):
             return new_tag
         try:
-            img.tag(repository=f"nihil/{variant}", tag=safe_version)
+            img.tag(repository=f"nihil/{variant}", tag=new_tag_suffix)
             return new_tag
         except docker.errors.APIError:
             return None
 
-    def _pull_with_progress(self, image: str) -> None:
+    def _pull_with_progress(self, image: str) -> Optional[str]:
         # Préserve une référence nommée vers l'image locale courante avant de pull
         # (sinon elle deviendrait dangling quand le tag :latest sera réassigné).
-        self.snapshot_local_image_as_version(image)
+        snapshot_tag = self.snapshot_local_image_as_version(image)
         from rich.progress import (
             Progress,
             BarColumn,
@@ -287,6 +294,7 @@ class NihilManager:
                     status=status,
                     completed=current if current else (totals[layer_id] if status in ("Pull complete", "Already exists") else None),
                 )
+        return snapshot_tag
 
     def container_exists(self, name: str) -> bool:
         try:
@@ -378,7 +386,7 @@ class NihilManager:
                 container_config["environment"] = dict(
                     kv.split("=", 1) for kv in container_config["environment"] if "=" in kv
                 )
-            container_config["environment"]["NIHIL_VPN"] = "1"
+            container_config["environment"]["NIHIL_VPN"] = "managed"
         if enable_x11:
             from nihil.utils.platform_info import get_host_os, HostOS
             _host_os = get_host_os()
@@ -730,6 +738,79 @@ class NihilManager:
         except Exception:
             return False
 
+    def start_vpn(self, container, config_path: str = "/opt/nihil/vpn/client.ovpn") -> bool:
+        """Start OpenVPN inside the container and wait for the tunnel."""
+        env = container.attrs.get("Config", {}).get("Env") or []
+        # Legacy entrypoints still own startup, even when their setup is slow.
+        if "NIHIL_VPN=1" in env and config_path == "/opt/nihil/vpn/client.ovpn":
+            return self.wait_for_vpn(container)
+        container.exec_run(["mkdir", "-p", "/var/log/nihil"])
+        container.exec_run(
+            ["openvpn", "--log-append", "/var/log/nihil/vpn.log",
+             "--config", config_path],
+            detach=True,
+        )
+        return self.wait_for_vpn(container)
+
+    def _running_vpn_config(self, container) -> Optional[str]:
+        """Return the --config path of the OpenVPN process running in the container, if any."""
+        try:
+            exit_code, output = container.exec_run(["pgrep", "-a", "-x", "openvpn"])
+        except Exception:
+            return None
+        if exit_code != 0 or not output:
+            return None
+        for line in output.decode("utf-8", errors="replace").splitlines():
+            args = line.split()
+            if "--config" in args[:-1]:
+                return args[args.index("--config") + 1]
+        return None
+
+    def _container_file_digest(self, container, path: str) -> Optional[str]:
+        try:
+            exit_code, output = container.exec_run(["sha256sum", path])
+        except Exception:
+            return None
+        if exit_code != 0 or not output:
+            return None
+        return output.decode("utf-8", errors="replace").split()[0]
+
+    def find_vpn_conflicts(self, container, config_path: str) -> List[str]:
+        """Names of other running containers whose OpenVPN uses the same config.
+
+        VPN servers usually allow one session per identity, so two tunnels with
+        the same config kick each other off until ping-restart fires.
+        """
+        digest = self._container_file_digest(container, config_path)
+        if not digest:
+            return []
+        conflicts = []
+        for other in self.list_containers(all=False):
+            if other.id == container.id:
+                continue
+            devices = (other.attrs.get("HostConfig") or {}).get("Devices") or []
+            if not any(d.get("PathOnHost") == "/dev/net/tun" for d in devices):
+                continue
+            other_config = self._running_vpn_config(other)
+            if other_config and self._container_file_digest(other, other_config) == digest:
+                conflicts.append(other.name)
+        return conflicts
+
+    def wait_for_vpn(self, container, timeout: int = 30) -> bool:
+        """Wait for tun0 to come up inside the container."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                exit_code, _ = container.exec_run(
+                    ["sh", "-c", "ip link show tun0 2>/dev/null | grep -q UP"]
+                )
+                if exit_code == 0:
+                    return True
+            except Exception:
+                pass
+            time.sleep(1)
+        return False
+
     def run_user_setup_script(self, container) -> Optional[str]:
         """Exécute /opt/my-resources/setup/load_user_setup.sh dans le container.
 
@@ -1039,7 +1120,7 @@ class NihilManager:
         environment = snapshot.get("environment") or {}
         if isinstance(environment, list):
             environment = dict(kv.split("=", 1) for kv in environment if "=" in kv)
-        if environment.get("NIHIL_VPN") == "1" and snapshot.get("network_mode") == "host":
+        if environment.get("NIHIL_VPN") in ("1", "managed") and snapshot.get("network_mode") == "host":
             snapshot["network_mode"] = "bridge"
         if snapshot["network_mode"]:
             container_config["network_mode"] = snapshot["network_mode"]

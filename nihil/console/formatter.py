@@ -43,7 +43,9 @@ class NihilFormatter:
         return self._colorize(f"[✗] {message}", self.RED)
 
     def info(self, message: str) -> str:
-        return self._colorize(f"[*] {message}", self.BLUE)
+        label, separator, detail = message.partition(":")
+        prefix = f"[*] {label}:" if separator else "[*]"
+        return f"{self._colorize(prefix, self.BLUE)} {detail.lstrip() if separator else message}"
 
     def warning(self, message: str) -> str:
         return self._colorize(f"[!] {message}", self.YELLOW)

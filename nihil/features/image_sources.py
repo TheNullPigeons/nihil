@@ -40,6 +40,23 @@ def _workflow_progress(run: dict) -> tuple[int, int, str]:
     return completed, max(len(steps), 1), label
 
 
+def _workflow_job_url(run: dict, repo: str, run_id: str) -> str:
+    """Link to the active job, or the failed/completed job when the run ends."""
+    jobs = run.get("jobs") or []
+    job = next((job for job in jobs if job.get("status") == "in_progress"), None)
+    if job is None:
+        job = next((job for job in jobs if job.get("conclusion") == "failure"), None)
+    if job is None:
+        job = next((job for job in jobs if job.get("status") == "queued"), None)
+    if job is None and jobs:
+        job = jobs[-1]
+    return (
+        f"https://github.com/{repo}/actions/runs/{run_id}/job/{job['databaseId']}"
+        if job and job.get("databaseId")
+        else f"https://github.com/{repo}/actions/runs/{run_id}"
+    )
+
+
 class ImageSourceManager:
     """Prepare the upstream repository and a personal nihil-images fork."""
 
@@ -53,7 +70,7 @@ class ImageSourceManager:
     @staticmethod
     def _normalize_repo(value: str) -> str:
         raw = value.strip().rstrip("/")
-        if raw.startswith(("https://", "http://")):
+        if raw.startswith(("https://", "http://", "ssh://")):
             raw = urlparse(raw).path.strip("/")
         if raw.endswith(".git"):
             raw = raw[:-4]
@@ -276,14 +293,8 @@ class ImageSourceManager:
             upstream_repo=self.upstream_repo,
         )
 
-    def ensure_upstream(self) -> Path:
+    def activate_upstream(self) -> None:
         path = self.config.image_sources_upstream_path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        upstream_url = f"https://github.com/{self.upstream_repo}.git"
-        if not (path / ".git").is_dir():
-            self._run(["git", "clone", upstream_url, str(path)])
-        else:
-            self._run(["git", "pull", "--ff-only"], cwd=path)
         self.config.set_image_source(
             active="upstream",
             path=path,
@@ -292,20 +303,25 @@ class ImageSourceManager:
             upstream_path=path,
             upstream_repo=self.upstream_repo,
         )
-        return path
 
     def trigger_build(
         self, *, variant: str = "all", wait: bool = False,
         progress_callback=None, cancel_event=None,
-    ) -> None:
-        """Trigger the Docker workflow on the active personal branch."""
+    ) -> tuple[str, str]:
+        """Trigger the Docker workflow for the active source and return its repo/ref."""
         if variant not in {"all", "full", "ad", "web", "blueteam"}:
             raise ImageSourceError("Unknown image variant. Choose all, full, ad, web, or blueteam.")
-        repo = self.config.personal_image_repo
-        branch = self.config.personal_image_branch
-        if not repo or not branch:
-            raise ImageSourceError("No personal fork is configured.")
-        self._enable_actions(repo)
+        if self.config.image_source_active == "upstream":
+            repo = self.upstream_repo
+            branch = self.config.image_channel
+        elif self.config.image_source_active == "personal":
+            repo = self.config.personal_image_repo
+            branch = self.config.personal_image_branch
+            if not repo or not branch:
+                raise ImageSourceError("No personal fork is configured.")
+            self._enable_actions(repo)
+        else:
+            raise ImageSourceError("Unknown source. Choose 'upstream' or 'personal'.")
         if progress_callback:
             progress_callback(0, 0, "Dispatching GitHub Actions")
         dispatch_started = datetime.now(timezone.utc)
@@ -348,6 +364,7 @@ class ImageSourceManager:
                     "The workflow was dispatched, but its new run ID could not be found."
                 )
             self._watch_build(run_id, repo, progress_callback, cancel_event)
+        return repo, branch
 
     def _watch_build(self, run_id: str, repo: str, progress_callback=None, cancel_event=None) -> None:
         """Follow a GitHub Actions run with a step-based progress bar."""
@@ -377,7 +394,7 @@ class ImageSourceManager:
                     self._run(["gh", "run", "cancel", run_id, "--repo", repo])
                     cancel_sent = True
                     label = "Cancellation requested"
-                update(completed, total, label, run.get("url") or "")
+                update(completed, total, label, _workflow_job_url(run, repo, run_id))
                 if run.get("status") != "completed":
                     time.sleep(3)
             return run
@@ -396,16 +413,26 @@ class ImageSourceManager:
                     task, completed=completed, total=total, description=label
                 ))
 
-        url = run.get("url") or f"https://github.com/{repo}/actions/runs/{run_id}"
+        url = _workflow_job_url(run, repo, run_id)
         if progress_callback:
-            try:
-                logs = self._run(
-                    ["gh", "run", "view", run_id, "--repo", repo, "--log"],
-                    timeout=None,
-                )
-            except ImageSourceError as exc:
-                logs = f"Logs could not be downloaded: {exc}"
             completed, total, _ = _workflow_progress(run)
+            logs = ""
+            error = None
+            for attempt in range(5):
+                progress_callback(completed, total, "Downloading complete build logs", url)
+                try:
+                    logs = self._run(
+                        ["gh", "run", "view", run_id, "--repo", repo, "--log"],
+                        timeout=None,
+                    )
+                except ImageSourceError as exc:
+                    error = exc
+                if logs.strip():
+                    break
+                if attempt < 4:
+                    time.sleep(2)
+            if not logs:
+                logs = f"Logs could not be downloaded: {error or 'GitHub returned an empty log archive.'}"
             progress_callback(completed, total, "Build logs ready", url, logs)
         if run.get("conclusion") == "cancelled":
             raise BuildCancelled(f"GitHub Actions build cancelled: {url}")
@@ -414,7 +441,7 @@ class ImageSourceManager:
         if self.formatter:
             print(self.formatter.info(f"GitHub Actions: {url}"))
 
-    def switch(self, source: str) -> Path:
+    def switch(self, source: str) -> Path | None:
         if source == "personal":
             path = self.config.personal_image_path
             if not path or not (path / ".git").is_dir():
@@ -432,5 +459,6 @@ class ImageSourceManager:
             )
             return path
         if source == "upstream":
-            return self.ensure_upstream()
+            self.activate_upstream()
+            return None
         raise ImageSourceError("Unknown source. Choose 'upstream' or 'personal'.")
