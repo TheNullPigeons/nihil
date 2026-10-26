@@ -89,7 +89,7 @@ def test_unreachable_daemon_reports_hint_and_error_exit_code(doctor, monkeypatch
     )
 
     assert doctor.run() == 2
-    docker_results = doctor._render.call_args.args[0][1][3]
+    docker_results = doctor._render.call_args.args[0][1][2]
     assert docker_results == [DoctorCheckResult(
         "Docker daemon accessible", CheckStatus.FAIL, "cannot connect", "start docker",
     )]
@@ -98,9 +98,9 @@ def test_unreachable_daemon_reports_hint_and_error_exit_code(doctor, monkeypatch
 def test_plain_render_shows_details_and_fix(capsys):
     formatter = MagicMock()
     formatter.warning.side_effect = lambda text: f"WARN {text}"
-    formatter.section_header.side_effect = lambda title, icon: title
+    formatter.section_header.side_effect = lambda title: title
     NihilDoctor(formatter=formatter)._render_plain([
-        ("Docker", "", "", [DoctorCheckResult("Image 'ad'", CheckStatus.WARN, "Not installed", "nihil install ad")]),
+        ("Docker", "", [DoctorCheckResult("Image 'ad'", CheckStatus.WARN, "Not installed", "nihil install ad")]),
     ])
 
     assert capsys.readouterr().out.splitlines() == [
@@ -387,7 +387,7 @@ def test_controller_routes_doctor_output(monkeypatch, argv, kwargs):
 def test_render_keeps_brackets_and_places_fix_by_width(monkeypatch, capsys, columns, fix_column):
     monkeypatch.setenv("COLUMNS", columns)
     NihilDoctor(formatter=MagicMock())._render([
-        ("Environment", "", "cyan", [DoctorCheckResult(
+        ("Environment", "cyan", [DoctorCheckResult(
             "Config file", CheckStatus.FAIL, "Unreadable (line 1: [unclosed)", "nihil config --edit",
         )]),
     ])

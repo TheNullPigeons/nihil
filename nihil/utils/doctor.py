@@ -71,7 +71,7 @@ class NihilDoctor:
         report_file: with the table, also save the Markdown report there ("" picks a dated name).
         """
         if output == "table":
-            print(self.formatter.section_header("Nihil doctor", "🩺"))
+            print(self.formatter.section_header("Nihil doctor"))
         sections, exit_code = self._collect()
         if output == "json":
             print(json.dumps(self._as_dict(sections, exit_code), indent=2))
@@ -118,18 +118,18 @@ class NihilDoctor:
                 "Docker checks", CheckStatus.FAIL, f"Skipped: {e}", f"sudo chown -R $USER {_tilde(NIHIL_HOME)}",
             ))
         sections = [
-            ("Environment", "🌍", "cyan", env_results),
-            ("Docker", "🐋", "magenta", docker_results),
+            ("Environment", "cyan", env_results),
+            ("Docker", "magenta", docker_results),
         ]
         if container_results:
-            sections.append(("Containers", "📦", "green", container_results))
+            sections.append(("Containers", "green", container_results))
         if exit_code is None:
-            failed = any(r.status == CheckStatus.FAIL for _, _, _, results in sections for r in results)
+            failed = any(r.status == CheckStatus.FAIL for _, _, results in sections for r in results)
             exit_code = 1 if failed else 0
         return sections, exit_code
 
     def _as_dict(self, sections, exit_code: int) -> dict:
-        all_results = [r for _, _, _, results in sections for r in results]
+        all_results = [r for _, _, results in sections for r in results]
         return {
             "nihil_version": __version__,
             "exit_code": exit_code,
@@ -142,7 +142,7 @@ class NihilDoctor:
                         for r in results
                     ],
                 }
-                for title, _, _, results in sections
+                for title, _, results in sections
             ],
         }
 
@@ -157,7 +157,7 @@ class NihilDoctor:
             "",
             "Container names, VPN config names, the user name, the host name and DOCKER_HOST are masked.",
         ]
-        for title, _, _, results in sections:
+        for title, _, results in sections:
             lines += ["", f"**{title}**", "", "| Check | Status | Details | Fix |", "|---|---|---|---|"]
             for r in results:
                 cells = [r.name, r.status.value, r.details or "", r.fix or ""]
@@ -190,13 +190,13 @@ class NihilDoctor:
         # Narrow terminals get the fix under the details instead of a column of its own.
         narrow = console.width < 100
         # Same Check/Status widths everywhere so the columns line up from one section to the next.
-        check_width = max(len(r.name) for _, _, _, results in sections for r in results)
+        check_width = max(len(r.name) for _, _, results in sections for r in results)
         status_width = max(len(status.value) for status in CheckStatus)
         tables = []
-        for title, icon, color, results in sections:
+        for title, color, results in sections:
             show_fix = any(r.fix for r in results) and not narrow
             table = Table(
-                title=f"{icon} {title}",
+                title=title,
                 title_style=f"bold {color}",
                 title_justify="left",
                 box=box.ROUNDED,
@@ -230,10 +230,10 @@ class NihilDoctor:
             CheckStatus.WARN: self.formatter.warning,
             CheckStatus.FAIL: self.formatter.error,
         }
-        for index, (title, icon, _, results) in enumerate(sections):
+        for index, (title, _, results) in enumerate(sections):
             if index:
                 print()
-            print(self.formatter.section_header(title, icon))
+            print(self.formatter.section_header(title))
             for r in results:
                 print(styles[r.status](r.name))
                 if r.details:
