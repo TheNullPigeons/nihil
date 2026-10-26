@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -5,6 +6,7 @@ from unittest.mock import MagicMock
 import docker
 import pytest
 
+from nihil.cli.parser import create_parser
 from nihil.exceptions import DockerUnavailable
 from nihil.manager.manager import NihilManager
 from nihil.utils.doctor import CheckStatus, DoctorCheckResult, NihilDoctor
@@ -253,3 +255,77 @@ def test_running_vpn_sessions_skips_containers_without_tun_or_vpn():
     manager._container_file_digest = lambda c, path: "h1"
 
     assert manager.running_vpn_sessions() == [("vpn", "h1")]
+
+
+def test_report_masks_identifying_values(doctor, monkeypatch):
+    monkeypatch.setattr("nihil.utils.doctor.getpass.getuser", lambda: "alice")
+    monkeypatch.setattr("nihil.utils.doctor.socket.gethostname", lambda: "kali-box")
+    doctor._sensitive = {}
+
+    def containers(manager):
+        doctor._sensitive.update({"acme-prod": "<container-1>", "acme": "<container-2>"})
+        return [DoctorCheckResult(
+            "VPN sessions", CheckStatus.WARN, "Same config used by: acme-prod, acme", "stop acme",
+        )]
+
+    doctor._check_containers = containers
+    doctor._check_image = MagicMock(return_value=[
+        DoctorCheckResult("Host", CheckStatus.INFO, "alice@kali-box | /home/alice/x"),
+    ])
+
+    report = doctor._as_markdown(doctor._collect()[0])
+
+    for leaked in ("alice", "kali-box", "acme"):
+        assert leaked not in report
+    assert "Same config used by: &lt;container-1&gt;, &lt;container-2&gt;" in report
+    assert "&lt;user&gt;@&lt;host&gt; \\| /home/&lt;user&gt;/x" in report
+
+
+def test_redact_does_not_touch_partial_matches(doctor):
+    doctor._sensitive = {"web": "<container-1>"}
+
+    assert doctor._redact("Image 'web' (web:main), webhook") == "Image '<container-1>' (<container-1>:main), webhook"
+
+
+def test_vpn_and_container_names_are_registered_as_sensitive(nihil_home):
+    for name in ("client.ovpn", "acme.ovpn"):
+        (nihil_home / "vpn" / name).write_text("client\n")
+    doc = NihilDoctor(formatter=MagicMock())
+    doc._check_vpn_host()
+    doc._check_containers(SimpleNamespace(
+        list_containers=lambda all: [_container("acme-prod")],
+        is_container_image_current=lambda c: True,
+        running_vpn_sessions=lambda: [],
+    ))
+
+    assert doc._sensitive == {"acme.ovpn": "<vpn-config-1>", "acme-prod": "<container-1>"}
+
+
+def test_json_output(doctor, capsys):
+    doctor._check_image = MagicMock(return_value=[DoctorCheckResult("Image 'ad'", CheckStatus.WARN, "Not installed", "nihil install ad")])
+
+    assert doctor.run(output="json") == 0
+
+    data = json.loads(capsys.readouterr().out)
+    assert data["exit_code"] == 0
+    assert data["summary"] == {"OK": 2, "INFO": 1, "WARN": 1, "FAIL": 0}
+    assert data["sections"][1]["checks"][-1] == {
+        "name": "Image 'ad'", "status": "WARN", "details": "Not installed", "fix": "nihil install ad",
+    }
+    doctor._render.assert_not_called()
+
+
+@pytest.mark.parametrize("argv,report,as_json", [
+    (["doctor"], False, False),
+    (["doctor", "--report"], True, False),
+    (["doctor", "--json"], False, True),
+])
+def test_doctor_output_flags(argv, report, as_json):
+    args = create_parser().parse_args(argv)
+
+    assert (args.report, args.json) == (report, as_json)
+
+
+def test_doctor_report_and_json_are_exclusive():
+    with pytest.raises(SystemExit):
+        create_parser().parse_args(["doctor", "--report", "--json"])

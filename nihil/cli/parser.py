@@ -120,7 +120,10 @@ Examples:
     image_build.add_argument("--web", action="store_true", help="Follow the GitHub Actions build in a local browser page")
     subparsers.add_parser("version", help="Display Nihil version")
 
-    subparsers.add_parser("doctor", help="Run diagnostics checks (Docker, image, environment)")
+    doctor_parser = subparsers.add_parser("doctor", help="Run diagnostics checks (Docker, image, environment)")
+    doctor_output = doctor_parser.add_mutually_exclusive_group()
+    doctor_output.add_argument("--report", action="store_true", help="Print a Markdown report to paste in an issue or PR (container names, VPN configs, user and host names are masked)")
+    doctor_output.add_argument("--json", action="store_true", help="Print the results as JSON (not masked)")
 
     start_parser = subparsers.add_parser("start", help="Start a container (creates it if it doesn't exist)")
     start_parser.add_argument("name", help="Container name")

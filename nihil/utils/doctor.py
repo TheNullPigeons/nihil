@@ -4,9 +4,13 @@
 
 from __future__ import annotations
 
+import getpass
+import json
 import os
 import platform
+import re
 import shutil
+import socket
 import stat
 import sys
 from collections import defaultdict
@@ -14,11 +18,12 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import docker
 import yaml
 
+from nihil import __version__
 from nihil.config import CONFIG_FILE, NIHIL_HOME, NihilConfig
 from nihil.exceptions import NihilError
 from nihil.console import NihilFormatter
@@ -55,10 +60,25 @@ class DoctorCheckResult:
 class NihilDoctor:
     def __init__(self, formatter: Optional[NihilFormatter] = None):
         self.formatter = formatter or NihilFormatter()
+        # Identifying values seen during the checks, masked in --report: value -> placeholder.
+        self._sensitive: Dict[str, str] = {}
 
-    def run(self) -> int:
+    def run(self, output: str = "table") -> int:
+        """Run every check. output: "table" (terminal), "report" (Markdown to share) or "json"."""
+        if output == "table":
+            print(self.formatter.section_header("Nihil doctor", "🩺"))
+        sections, exit_code = self._collect()
+        if output == "json":
+            print(json.dumps(self._as_dict(sections, exit_code), indent=2))
+        elif output == "report":
+            print(self._as_markdown(sections))
+        else:
+            self._render(sections)
+        return exit_code
+
+    def _collect(self):
+        self._sensitive = {}
         exit_code: Optional[int] = None
-        print(self.formatter.section_header("Nihil doctor", "🩺"))
         env_results = (
             self._check_runtime()
             + self._check_nihil_home()
@@ -90,12 +110,59 @@ class NihilDoctor:
         ]
         if container_results:
             sections.append(("Containers", "📦", "green", container_results))
-        self._render(sections)
-        if exit_code is not None:
-            return exit_code
-        if any(r.status == CheckStatus.FAIL for _, _, _, results in sections for r in results):
-            return 1
-        return 0
+        if exit_code is None:
+            failed = any(r.status == CheckStatus.FAIL for _, _, _, results in sections for r in results)
+            exit_code = 1 if failed else 0
+        return sections, exit_code
+
+    def _as_dict(self, sections, exit_code: int) -> dict:
+        all_results = [r for _, _, _, results in sections for r in results]
+        return {
+            "nihil_version": __version__,
+            "exit_code": exit_code,
+            "summary": {status.value: sum(r.status == status for r in all_results) for status in CheckStatus},
+            "sections": [
+                {
+                    "title": title,
+                    "checks": [
+                        {"name": r.name, "status": r.status.value, "details": r.details, "fix": r.fix}
+                        for r in results
+                    ],
+                }
+                for title, _, _, results in sections
+            ],
+        }
+
+    def _as_markdown(self, sections) -> str:
+        """Report meant to be pasted in a public issue or PR: identifying values are masked."""
+        summary = self._as_dict(sections, 0)["summary"]
+        counts = ", ".join(f"{n} {status}" for status, n in summary.items() if n) or "no checks"
+        lines = [
+            "### nihil doctor report",
+            "",
+            f"nihil {__version__} · {counts}",
+            "",
+            "Container names, VPN config names, the user name, the host name and DOCKER_HOST are masked.",
+        ]
+        for title, _, _, results in sections:
+            lines += ["", f"**{title}**", "", "| Check | Status | Details | Fix |", "|---|---|---|---|"]
+            for r in results:
+                cells = [r.name, r.status.value, r.details or "", r.fix or ""]
+                lines.append("| " + " | ".join(_md_cell(self._redact(c)) for c in cells) + " |")
+        return "\n".join(lines)
+
+    def _redact(self, text: str) -> str:
+        replacements = dict(self._sensitive)
+        user = getpass.getuser()
+        if len(user) >= 3:
+            replacements.setdefault(user, "<user>")
+        host = socket.gethostname()
+        if host:
+            replacements.setdefault(host, "<host>")
+        # Longest first, so a name that contains another one is masked as a whole.
+        for value in sorted(replacements, key=len, reverse=True):
+            text = re.sub(rf"(?<![\w.-]){re.escape(value)}(?![\w.-])", replacements[value], text)
+        return text
 
     def _render(self, sections) -> None:
         try:
@@ -143,6 +210,8 @@ class NihilDoctor:
         py = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
         host_os = get_host_os()
         python_ok = sys.version_info >= (3, 12)
+        if os.environ.get("DOCKER_HOST"):
+            self._sensitive[os.environ["DOCKER_HOST"]] = "<docker-host>"
         results = [
             DoctorCheckResult(
                 "Python >= 3.12",
@@ -249,6 +318,9 @@ class NihilDoctor:
         # Mirrors how `nihil start --vpn` picks a config when no file is given.
         vpn_dir = NIHIL_HOME / "vpn"
         configs = sorted(vpn_dir.glob("*.ovpn")) if vpn_dir.is_dir() else []
+        for index, config in enumerate(configs, 1):
+            if config.name != "client.ovpn":
+                self._sensitive[config.name] = f"<vpn-config-{index}>"
         if (vpn_dir / "client.ovpn").is_file():
             results.append(DoctorCheckResult("VPN configs", CheckStatus.OK, f"Default: client.ovpn ({len(configs)} in {_tilde(vpn_dir)})"))
         elif len(configs) == 1:
@@ -285,6 +357,12 @@ class NihilDoctor:
             DockerEngine.UNKNOWN: "Unknown",
         }
         label = engine_labels.get(engine, "Unknown")
+        try:
+            server_version = manager.client.version().get("Version")
+        except docker.errors.DockerException:
+            server_version = None
+        if server_version:
+            label = f"{label} {server_version}"
         results = [DoctorCheckResult("Docker engine", CheckStatus.INFO, label)]
         if host_os == HostOS.MACOS and engine == DockerEngine.DOCKER_DESKTOP:
             results.append(DoctorCheckResult(
@@ -380,6 +458,8 @@ class NihilDoctor:
 
     def _check_containers(self, manager: NihilManager) -> List[DoctorCheckResult]:
         containers = manager.list_containers(all=True)
+        for index, container in enumerate(containers, 1):
+            self._sensitive[container.name] = f"<container-{index}>"
         if not containers:
             return [DoctorCheckResult("Containers", CheckStatus.INFO, "No nihil container yet")]
         running = sum(1 for c in containers if c.status == "running")
@@ -407,6 +487,12 @@ class NihilDoctor:
         elif sessions:
             results.append(DoctorCheckResult("VPN sessions", CheckStatus.OK, f"{len(sessions)} active, no shared config"))
         return results
+
+
+def _md_cell(text: str) -> str:
+    # GitHub drops unknown tags, so placeholders like <container-1> must be escaped.
+    text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    return text.replace("|", "\\|").replace("\n", " ")
 
 
 def _tilde(path: Path) -> str:
