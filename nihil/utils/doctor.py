@@ -16,6 +16,7 @@ import sys
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -63,8 +64,12 @@ class NihilDoctor:
         # Identifying values seen during the checks, masked in --report: value -> placeholder.
         self._sensitive: Dict[str, str] = {}
 
-    def run(self, output: str = "table") -> int:
-        """Run every check. output: "table" (terminal), "report" (Markdown to share) or "json"."""
+    def run(self, output: str = "table", report_file: Optional[str] = None) -> int:
+        """Run every check.
+
+        output: "table" (terminal), "report" (Markdown to share, on stdout) or "json".
+        report_file: with the table, also save the Markdown report there ("" picks a dated name).
+        """
         if output == "table":
             print(self.formatter.section_header("Nihil doctor", "🩺"))
         sections, exit_code = self._collect()
@@ -74,6 +79,14 @@ class NihilDoctor:
             print(self._as_markdown(sections))
         else:
             self._render(sections)
+            if report_file is not None:
+                path = Path(report_file or f"nihil-doctor-{datetime.now():%Y%m%d-%H%M%S}.md").expanduser()
+                try:
+                    path.write_text(self._as_markdown(sections) + "\n", encoding="utf-8")
+                except OSError as e:
+                    print(self.formatter.error(f"Could not write the report to {path}: {e}"), file=sys.stderr)
+                    return exit_code or 1
+                print(self.formatter.success(f"Report saved to {path} (identifying names are masked)"))
         return exit_code
 
     def _collect(self):

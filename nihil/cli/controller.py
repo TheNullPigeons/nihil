@@ -194,7 +194,7 @@ class NihilController:
             parsed_args.command is not None and
             parsed_args.command not in ["version", "completion", "config", "exec"] and
             not (parsed_args.command == "start" and not getattr(parsed_args, "verbose", False)) and
-            not (parsed_args.command == "doctor" and (parsed_args.report or parsed_args.json))
+            not (parsed_args.command == "doctor" and (parsed_args.report == "-" or parsed_args.json))
         )
         if should_show_banner:
             print_compact_banner()
@@ -206,8 +206,11 @@ class NihilController:
             return 0
         if parsed_args.command == "doctor":
             doctor = NihilDoctor(formatter=self.formatter)
-            output = "report" if parsed_args.report else "json" if parsed_args.json else "table"
-            return doctor.run(output=output)
+            if parsed_args.json:
+                return doctor.run(output="json")
+            if parsed_args.report == "-":
+                return doctor.run(output="report")
+            return doctor.run(report_file=parsed_args.report)
         if parsed_args.command == "config":
             return self._cmd_config(parsed_args)
         if parsed_args.command == "resources":

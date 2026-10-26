@@ -60,7 +60,7 @@ Features: the use case, and why it belongs in nihil.
 <details>
 <summary>Environment (`nihil doctor --report`)</summary>
 
-<!-- Paste the output of `nihil doctor --report` here. Container, VPN config, user and host names are masked. -->
+<!-- Run `nihil doctor --report` and paste the generated nihil-doctor-*.md file here. Container, VPN config, user and host names are masked. -->
 
 </details>
 

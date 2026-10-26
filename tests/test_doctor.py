@@ -316,9 +316,11 @@ def test_json_output(doctor, capsys):
 
 
 @pytest.mark.parametrize("argv,report,as_json", [
-    (["doctor"], False, False),
-    (["doctor", "--report"], True, False),
-    (["doctor", "--json"], False, True),
+    (["doctor"], None, False),
+    (["doctor", "--report"], "", False),
+    (["doctor", "--report", "out.md"], "out.md", False),
+    (["doctor", "--report", "-"], "-", False),
+    (["doctor", "--json"], None, True),
 ])
 def test_doctor_output_flags(argv, report, as_json):
     args = create_parser().parse_args(argv)
@@ -329,3 +331,53 @@ def test_doctor_output_flags(argv, report, as_json):
 def test_doctor_report_and_json_are_exclusive():
     with pytest.raises(SystemExit):
         create_parser().parse_args(["doctor", "--report", "--json"])
+
+
+def test_report_file_is_written_next_to_the_table(doctor, tmp_path):
+    doctor._check_image = MagicMock(return_value=[])
+    target = tmp_path / "report.md"
+
+    assert doctor.run(report_file=str(target)) == 0
+
+    doctor._render.assert_called_once()
+    assert target.read_text().startswith("### nihil doctor report")
+    doctor.formatter.success.assert_called_once()
+
+
+def test_report_file_defaults_to_a_dated_name(doctor, tmp_path, monkeypatch):
+    doctor._check_image = MagicMock(return_value=[])
+    monkeypatch.chdir(tmp_path)
+
+    doctor.run(report_file="")
+
+    [report] = tmp_path.glob("nihil-doctor-*.md")
+    assert report.read_text().startswith("### nihil doctor report")
+
+
+def test_unwritable_report_file_fails(doctor, tmp_path):
+    doctor._check_image = MagicMock(return_value=[])
+
+    assert doctor.run(report_file=str(tmp_path / "missing-dir" / "report.md")) == 1
+    doctor.formatter.error.assert_called_once()
+
+
+@pytest.mark.parametrize("argv,kwargs", [
+    (["doctor"], {"report_file": None}),
+    (["doctor", "--report"], {"report_file": ""}),
+    (["doctor", "--report", "out.md"], {"report_file": "out.md"}),
+    (["doctor", "--report", "-"], {"output": "report"}),
+    (["doctor", "--json"], {"output": "json"}),
+])
+def test_controller_routes_doctor_output(monkeypatch, argv, kwargs):
+    from nihil.cli.controller import NihilController
+
+    doctor = MagicMock()
+    doctor.run.return_value = 0
+    monkeypatch.setattr("nihil.cli.controller.NihilDoctor", lambda formatter: doctor)
+    monkeypatch.setattr("nihil.cli.controller.print_compact_banner", MagicMock())
+    controller = object.__new__(NihilController)
+    controller.parser = create_parser()
+    controller.formatter = MagicMock()
+
+    assert controller.run(argv) == 0
+    doctor.run.assert_called_once_with(**kwargs)
