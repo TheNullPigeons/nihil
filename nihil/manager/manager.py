@@ -11,7 +11,7 @@ import sys
 import tarfile
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
 
 import docker
 
@@ -784,17 +784,23 @@ class NihilManager:
         digest = self._container_file_digest(container, config_path)
         if not digest:
             return []
-        conflicts = []
-        for other in self.list_containers(all=False):
-            if other.id == container.id:
+        return [name for name, other_digest in self.running_vpn_sessions(exclude_id=container.id)
+                if other_digest == digest]
+
+    def running_vpn_sessions(self, exclude_id: Optional[str] = None) -> List[Tuple[str, str]]:
+        """(container name, config digest) for each running container with an active OpenVPN."""
+        sessions = []
+        for container in self.list_containers(all=False):
+            if container.id == exclude_id:
                 continue
-            devices = (other.attrs.get("HostConfig") or {}).get("Devices") or []
+            devices = (container.attrs.get("HostConfig") or {}).get("Devices") or []
             if not any(d.get("PathOnHost") == "/dev/net/tun" for d in devices):
                 continue
-            other_config = self._running_vpn_config(other)
-            if other_config and self._container_file_digest(other, other_config) == digest:
-                conflicts.append(other.name)
-        return conflicts
+            config = self._running_vpn_config(container)
+            digest = self._container_file_digest(container, config) if config else None
+            if digest:
+                sessions.append((container.name, digest))
+        return sessions
 
     def wait_for_vpn(self, container, timeout: int = 30) -> bool:
         """Wait for tun0 to come up inside the container."""
