@@ -33,7 +33,7 @@ def _manager(installed, updates=None):
 
 
 def _statuses(results):
-    return {r.name.split("'")[1]: r.status for r in results}
+    return {r.name.split()[1].split("/")[-1].split(":")[0]: r.status for r in results}
 
 
 def test_missing_optional_image_is_a_warning_with_fix():
@@ -381,3 +381,18 @@ def test_controller_routes_doctor_output(monkeypatch, argv, kwargs):
 
     assert controller.run(argv) == 0
     doctor.run.assert_called_once_with(**kwargs)
+
+
+@pytest.mark.parametrize("columns,fix_column", [("80", False), ("140", True)])
+def test_render_keeps_brackets_and_places_fix_by_width(monkeypatch, capsys, columns, fix_column):
+    monkeypatch.setenv("COLUMNS", columns)
+    NihilDoctor(formatter=MagicMock())._render([
+        ("Environment", "", "cyan", [DoctorCheckResult(
+            "Config file", CheckStatus.FAIL, "Unreadable (line 1: [unclosed)", "nihil config --edit",
+        )]),
+    ])
+
+    out = capsys.readouterr().out
+    assert "[unclosed" in out
+    assert ("│ Fix" in out) == fix_column
+    assert ("→ nihil config --edit" in out) == (not fix_column)

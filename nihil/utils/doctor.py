@@ -179,27 +179,49 @@ class NihilDoctor:
 
     def _render(self, sections) -> None:
         try:
+            from rich import box
             from rich.console import Console
             from rich.table import Table
-            from rich.panel import Panel
+            from rich.text import Text
         except ImportError:
             self._render_plain(sections)
             return
         console = Console()
+        # Narrow terminals get the fix under the details instead of a column of its own.
+        narrow = console.width < 100
+        # Same Check/Status widths everywhere so the columns line up from one section to the next.
+        check_width = max(len(r.name) for _, _, _, results in sections for r in results)
+        status_width = max(len(status.value) for status in CheckStatus)
+        tables = []
         for title, icon, color, results in sections:
-            show_fix = any(r.fix for r in results)
-            table = Table(show_header=True, header_style=f"bold {color}")
-            table.add_column("Check", style="bold")
-            table.add_column("Status", style="bold")
+            show_fix = any(r.fix for r in results) and not narrow
+            table = Table(
+                title=f"{icon} {title}",
+                title_style=f"bold {color}",
+                title_justify="left",
+                box=box.ROUNDED,
+                border_style=color,
+                header_style=f"bold {color}",
+            )
+            table.add_column("Check", style="bold", min_width=check_width, no_wrap=True)
+            table.add_column("Status", style="bold", min_width=status_width, no_wrap=True)
             table.add_column("Details")
             if show_fix:
-                table.add_column("Fix")
+                table.add_column("Fix", no_wrap=True)
             for r in results:
-                row = [r.name, f"[{_RICH_STYLES[r.status]}]{r.status.value}[/]", r.details or ""]
+                # Text, not markup: details may contain brackets (YAML errors, paths).
+                details = Text(r.details or "")
+                if r.fix and not show_fix:
+                    details.append(("\n" if r.details else "") + f"→ {r.fix}", style="dim")
+                row = [Text(r.name), Text(r.status.value, style=_RICH_STYLES[r.status]), details]
                 if show_fix:
-                    row.append(r.fix or "")
+                    row.append(Text(r.fix or ""))
                 table.add_row(*row)
-            console.print(Panel(table, title=f"[bold]{title}[/] {icon}", border_style=color, padding=(0, 1)))
+            tables.append(table)
+        width = min(console.width, max(console.measure(t).maximum for t in tables))
+        for table in tables:
+            table.width = width
+            console.print(table)
 
     def _render_plain(self, sections) -> None:
         styles = {
@@ -438,7 +460,7 @@ class NihilDoctor:
             if image in seen:
                 continue
             seen.add(image)
-            display_name = f"Image '{label}' ({manager.short_image_name(image)})"
+            display_name = f"Image {manager.short_image_name(image)}"
             try:
                 manager.client.images.get(image)
                 out.append(DoctorCheckResult(display_name, CheckStatus.OK, "Present locally"))
