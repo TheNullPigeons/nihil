@@ -54,8 +54,15 @@ Features: the use case, and why it belongs in nihil.
 
 - [ ] `pytest` passes locally
 - [ ] Tests added or updated for the change (or explained why not)
-- [ ] Tested manually with a real container. Image: <!-- e.g. full --> · Host OS / Docker engine: <!-- e.g. Arch, Docker 27 native -->
+- [ ] Tested manually with a real container. Image: <!-- e.g. full -->
 - [ ] For a bug fix: reproduced the bug before the change and confirmed it is gone after
+
+<details>
+<summary>Environment (`nihil doctor --report`)</summary>
+
+<!-- Run `nihil doctor --report` and paste the generated nihil-doctor-*.md file here. Container, VPN config, user and host names are masked. -->
+
+</details>
 
 <details>
 <summary>Output / logs</summary>
