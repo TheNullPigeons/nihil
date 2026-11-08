@@ -795,7 +795,7 @@ class NihilController:
             if browser_ui_session:
                 table.add_row("Session (browser)", f"[green]{browser_ui_session}[/]")
             else:
-                table.add_row("Session (browser)", "[dim](see browser page)[/]")
+                table.add_row("Session (browser)", "[dim]root, password in /opt/nihil/.session_password[/]")
         if update_available is True:
             table.add_row("Image update", "[yellow]Update available[/] → run [bold cyan]nihil update[/]")
         elif update_available is False:
@@ -1673,7 +1673,8 @@ class NihilController:
             if not container:
                 print(self.formatter.error(f"Container '{container_name}' doesn't exist."), file=sys.stderr)
                 return 1
-            self._print_container_info(container, args, created=False)
+            session_str = browser_ui_get_session_str(container, container_name)
+            self._print_container_info(container, args, created=False, browser_ui_session=session_str)
             return 0
         print(self.formatter.info(f"Nihil version {__version__}\n"))
         print(self.formatter.info(f"Active image source: {self.formatter.image_source(self.config.image_source_active)}"))
