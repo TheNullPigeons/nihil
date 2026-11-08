@@ -149,6 +149,8 @@ Examples:
         help="Start the container with OpenVPN. With FILE, use that .ovpn file; without FILE, use ~/.nihil/vpn/client.ovpn or the only .ovpn in ~/.nihil/vpn.",
     )
     start_vpn.add_argument("--no-vpn", dest="vpn", action="store_false", help="Disable VPN")
+    start_parser.add_argument("--vpn-user", metavar="USER", default=None, help="VPN username, for configs that use auth-user-pass. Prompts for the password unless --vpn-pass is given.")
+    start_parser.add_argument("--vpn-pass", metavar="PASSWORD", default=None, help="VPN password (visible in shell history and ps; prefer the prompt).")
     start_parser.add_argument(
         "--env",
         "-e",
