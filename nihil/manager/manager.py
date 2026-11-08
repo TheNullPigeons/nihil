@@ -329,6 +329,7 @@ class NihilManager:
         disable_nihil_resources: bool = False,
         nihil_resources_path: Optional[Path] = None,
         browser_ui: bool = False,
+        browser_ui_resolution: Optional[str] = None,
         browser_ui_port: Optional[int] = None,
         browser_ui_password: Optional[str] = None,
         environment: Optional[Dict[str, str]] = None,
@@ -484,6 +485,7 @@ class NihilManager:
                     kv.split("=", 1) for kv in container_config["environment"] if "=" in kv
                 )
             container_config["environment"]["NIHIL_BROWSER_UI"] = "1"
+            container_config["environment"]["NIHIL_BROWSER_UI_RESOLUTION"] = browser_ui_resolution or "1280x720"
             container_config["environment"]["NIHIL_BROWSER_UI_PORT"] = str(browser_ui_port)
             # In "host" network mode the container shares the host's network namespace
             # directly, so whatever address the in-container noVNC proxy binds to is the

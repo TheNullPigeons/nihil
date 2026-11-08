@@ -174,6 +174,7 @@ Examples:
     start_browser_ui = start_parser.add_mutually_exclusive_group()
     start_browser_ui.add_argument("--browser-ui", dest="browser_ui", action="store_true", default=None, help="Expose a browser-based UI (noVNC) for this session.")
     start_browser_ui.add_argument("--no-browser-ui", dest="browser_ui", action="store_false", help="Disable the browser UI.")
+    start_parser.add_argument("--browser-ui-resolution", choices=("1280x720", "1920x1080", "2560x1440"), default="1280x720", metavar="SIZE", help="Browser UI desktop resolution (default: 1280x720).")
     start_parser.add_argument("--browser-ui-port", type=int, default=None, metavar="PORT", help="Port for the browser UI (default: random 6901-6999 if not set).")
     start_parser.add_argument("--browser-ui-password", type=str, default=None, metavar="PASSWORD", help="Password for browser UI session (default: random, shown once when ready).")
     start_log = start_parser.add_mutually_exclusive_group()
@@ -188,6 +189,7 @@ Examples:
 
     restart_parser = subparsers.add_parser("restart", help="Restart one or more containers (stop + start)")
     restart_parser.add_argument("names", nargs="+", help="Container name(s)")
+    restart_parser.add_argument("--browser-ui-resolution", choices=("1280x720", "1920x1080", "2560x1440"), default=None, metavar="SIZE", help="Recreate Browser UI at this desktop resolution.")
     restart_parser.add_argument("--no-shell", action="store_true", help="Don't open shell after restarting")
 
     remove_parser = subparsers.add_parser("remove", help="Remove one or more containers")

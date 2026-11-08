@@ -61,7 +61,12 @@ class TestCreateParser:
         assert args.network == "docker"
         assert args.image == "web"
         assert args.browser_ui is True
+        assert args.browser_ui_resolution == "1280x720"
         assert args.no_shell is True
+
+    def test_parse_start_browser_ui_resolution(self):
+        args = create_parser().parse_args(["start", "box", "--browser-ui", "--browser-ui-resolution", "1920x1080"])
+        assert args.browser_ui_resolution == "1920x1080"
 
     def test_parse_start_tmux(self):
         parser = create_parser()

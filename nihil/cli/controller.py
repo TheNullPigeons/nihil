@@ -516,6 +516,7 @@ class NihilController:
             if workspace_path is not None:
                 workspace_path = str(Path(workspace_path).expanduser().resolve())
             browser_ui_enabled = getattr(args, "browser_ui", False)
+            browser_ui_resolution = getattr(args, "browser_ui_resolution", "1280x720")
             enable_x11, enable_wayland, display_messages = self._resolve_display_forwarding(
                 enable_x11, enable_wayland, browser_ui_enabled
             )
@@ -553,6 +554,7 @@ class NihilController:
                 disable_nihil_resources=getattr(args, "no_nihil_resources", False),
                 nihil_resources_path=self.config.nihil_resources_path,
                 browser_ui=browser_ui_enabled,
+                browser_ui_resolution=browser_ui_resolution if browser_ui_enabled else None,
                 browser_ui_port=browser_ui_port if browser_ui_enabled else None,
                 browser_ui_password=browser_ui_password if browser_ui_enabled else None,
                 environment=environment,
@@ -830,14 +832,56 @@ class NihilController:
                     errors += 1
                     continue
                 with self._loading(f"Restarting container '{container_name}'..."):
-                    if container.status == "running":
-                        self.manager.stop_container(container)
-                    self.manager.start_container(container)
+                    resolution = getattr(args, "browser_ui_resolution", None)
+                    env = dict(
+                        kv.split("=", 1) for kv in container.attrs.get("Config", {}).get("Env", []) if "=" in kv
+                    )
+                    if resolution and env.get("NIHIL_BROWSER_UI") == "1":
+                        snapshot = self.manager.snapshot_container_config(container)
+                        snapshot["environment"]["NIHIL_BROWSER_UI_RESOLUTION"] = resolution
+                        preserve = ["/root/.bash_history", "/root/.zsh_history", "/root/.nihil-history", "/root/.nxc", "/root/.netexec", "/root/.cme", "/root/.hashcat/hashcat.potfile", "/root/.john/john.pot"]
+                        saved_files = self.manager.extract_container_data(container, preserve)
+                        was_running = container.status == "running"
+                        if was_running:
+                            self.manager.stop_container(container)
+                        self.manager.remove_container(container, force=True)
+                        container = self.manager.recreate_container(snapshot)
+                        if was_running or saved_files:
+                            self.manager.start_container(container)
+                        if saved_files:
+                            self.manager.restore_container_data(container, saved_files)
+                        if not was_running and saved_files:
+                            self.manager.stop_container(container)
+                    else:
+                        if resolution and env.get("NIHIL_BROWSER_UI") != "1":
+                            raise ValueError(f"Browser UI is not enabled for container '{container_name}'")
+                        if container.status == "running":
+                            self.manager.stop_container(container)
+                        self.manager.start_container(container)
                 env_list = container.attrs.get("Config", {}).get("Env") or []
+                if any(e == "NIHIL_BROWSER_UI=1" for e in env_list):
+                    port = 6901
+                    for entry in env_list:
+                        if entry.startswith("NIHIL_BROWSER_UI_PORT="):
+                            try:
+                                port = int(entry.split("=", 1)[1])
+                            except ValueError:
+                                pass
+                            break
+                    print(self.formatter.info("Waiting for Browser UI..."))
+                    deadline = time.monotonic() + 180
+                    ready = browser_ui_is_page_ready(port)
+                    while time.monotonic() < deadline and not ready:
+                        time.sleep(2)
+                        ready = browser_ui_is_page_ready(port)
+                    if ready:
+                        print(self.formatter.success("Browser UI ready."))
+                    else:
+                        print(self.formatter.warning("Browser UI is still starting; open the link again when ready."))
                 if any(e in ("NIHIL_VPN=managed", "NIHIL_VPN=1") for e in env_list):
                     if not self.manager.wait_for_vpn(container, timeout=2):
                         self._start_vpn_with_feedback(container)
-            except (NihilError, APIError) as exc:
+            except (NihilError, APIError, ValueError) as exc:
                 print(self.formatter.error(f"Could not restart container '{container_name}': {exc}"), file=sys.stderr)
                 errors += 1
                 continue
