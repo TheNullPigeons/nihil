@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """Controller CLI Nihil: point d'entrée et dispatch des commandes."""
 
+import getpass
 import os
 import secrets
 import shlex
@@ -11,7 +12,7 @@ import time
 from contextlib import nullcontext
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from docker.errors import APIError
 from nihil.config import ensure_filesystem, NihilConfig, NIHIL_HOME
@@ -163,7 +164,22 @@ class NihilController:
     def _container_uses_host_network(self, container) -> bool:
         return (container.attrs.get("HostConfig") or {}).get("NetworkMode") == "host"
 
-    def _start_vpn_with_feedback(self, container, config_path: str = "/opt/nihil/vpn/client.ovpn") -> None:
+    def _vpn_auth(self, args) -> Optional[Tuple[str, str]]:
+        """(user, password) from --vpn-user/--vpn-pass, prompting for a missing password."""
+        user, password = getattr(args, "vpn_user", None), getattr(args, "vpn_pass", None)
+        if user is None:
+            if password is not None:
+                raise ValueError("--vpn-pass requires --vpn-user.")
+            return None
+        if password is None:
+            password = getpass.getpass(f"VPN password for {user}: ")
+        # OpenVPN reads the auth file as one line for the user, one for the password.
+        if "\n" in user or "\n" in password:
+            raise ValueError("VPN user and password cannot contain newlines.")
+        return user, password
+
+    def _start_vpn_with_feedback(self, container, config_path: str = "/opt/nihil/vpn/client.ovpn",
+                                 auth: Optional[Tuple[str, str]] = None) -> None:
         """Start OpenVPN inside the container and wait for the tunnel with a visual spinner."""
         conflicts = self.manager.find_vpn_conflicts(container, config_path)
         if conflicts:
@@ -174,7 +190,7 @@ class NihilController:
             ))
         try:
             with self._loading("Starting OpenVPN and waiting for tunnel (tun0)..."):
-                connected = self.manager.start_vpn(container, config_path=config_path)
+                connected = self.manager.start_vpn(container, config_path=config_path, auth=auth)
             if connected:
                 print(self.formatter.success("VPN tunnel established."))
             else:
@@ -356,6 +372,11 @@ class NihilController:
             args.network = self.config.default_network
         if not self._apply_vpn_network_policy(args, explicit_network):
             return 1
+        try:
+            vpn_auth = self._vpn_auth(args)
+        except ValueError as e:
+            print(self.formatter.error(str(e)), file=sys.stderr)
+            return 1
         from nihil.utils.platform_info import get_host_os, get_docker_engine, host_network_supported, HostOS
         _host_os = get_host_os()
         _docker_engine = get_docker_engine(self.manager.client)
@@ -419,7 +440,7 @@ class NihilController:
             )
             session_vpn_requested = bool(getattr(args, "vpn", None))
             if container_has_vpn_config and not session_vpn_requested and not self.manager.wait_for_vpn(container, timeout=2):
-                self._start_vpn_with_feedback(container)
+                self._start_vpn_with_feedback(container, auth=vpn_auth)
             delay_info = not args.no_shell and any(e == "NIHIL_BROWSER_UI=1" for e in env_list)
             if verbose and not delay_info:
                 self._print_container_info(container, args, created=False, update_available=get_update(container))
@@ -552,7 +573,7 @@ class NihilController:
                 except RuntimeError as e:
                     print(self.formatter.warning(f"User setup script failed: {e}"))
             if bool(vpn_path):
-                self._start_vpn_with_feedback(container)
+                self._start_vpn_with_feedback(container, auth=vpn_auth)
             if verbose and not (browser_ui_enabled and not args.no_shell):
                 self._print_container_info(container, args, created=True, update_available=get_update(container))
         command = self._start_shell_command(args)
@@ -579,7 +600,7 @@ class NihilController:
                             return 1
                     if self.manager.copy_file_into_container(container, str(vpn_file), "/tmp/nihil_vpn.ovpn"):
                         container.exec_run(["killall", "openvpn"])
-                        self._start_vpn_with_feedback(container, config_path="/tmp/nihil_vpn.ovpn")
+                        self._start_vpn_with_feedback(container, config_path="/tmp/nihil_vpn.ovpn", auth=vpn_auth)
                         command = f"sh -c {shlex.quote(command + '; killall openvpn >/dev/null 2>&1')}"
                     else:
                         print(self.formatter.warning("Could not copy VPN config into container. Start OpenVPN manually if needed."))

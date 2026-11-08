@@ -34,6 +34,45 @@ def test_managed_start_launches_openvpn():
     )
 
 
+def test_managed_start_passes_credentials_in_file():
+    import io, tarfile
+    manager = object.__new__(NihilManager)
+    manager.wait_for_vpn = MagicMock(return_value=True)
+    container = MagicMock()
+    container.attrs = {"Config": {"Env": ["NIHIL_VPN=managed"]}}
+
+    assert manager.start_vpn(container, auth=("alice", "s3cret")) is True
+    path, archive = container.put_archive.call_args.args
+    member = tarfile.open(fileobj=io.BytesIO(archive)).getmembers()[0]
+    assert (path, member.name, member.mode) == ("/tmp", "nihil_vpn_auth", 0o600)
+    container.exec_run.assert_any_call(
+        ["openvpn", "--log-append", "/var/log/nihil/vpn.log",
+         "--config", "/opt/nihil/vpn/client.ovpn",
+         "--auth-user-pass", "/tmp/nihil_vpn_auth"], detach=True,
+    )
+
+
+@pytest.mark.parametrize("argv, expected", [
+    ([], None),
+    (["--vpn-user", "alice", "--vpn-pass", "pw"], ("alice", "pw")),
+])
+def test_vpn_auth_from_args(argv, expected):
+    args = create_parser().parse_args(["start", "box"] + argv)
+    assert NihilController._vpn_auth(None, args) == expected
+
+
+def test_vpn_auth_prompts_for_missing_password(monkeypatch):
+    monkeypatch.setattr("getpass.getpass", lambda prompt: "typed")
+    args = create_parser().parse_args(["start", "box", "--vpn-user", "alice"])
+    assert NihilController._vpn_auth(None, args) == ("alice", "typed")
+
+
+def test_vpn_pass_without_user_is_rejected():
+    args = create_parser().parse_args(["start", "box", "--vpn-pass", "pw"])
+    with pytest.raises(ValueError):
+        NihilController._vpn_auth(None, args)
+
+
 def test_logged_shell_sets_recording_prompt_flag(controller):
     args = create_parser().parse_args(["start", "box", "--log"])
 
@@ -75,7 +114,7 @@ def test_session_vpn_starts_once_with_or_without_shell(controller, tmp_path, no_
     assert controller._cmd_start(args) == 0
     container = controller.manager.get_container.return_value
     controller._start_vpn_with_feedback.assert_called_once_with(
-        container, config_path="/tmp/nihil_vpn.ovpn",
+        container, config_path="/tmp/nihil_vpn.ovpn", auth=None,
     )
     assert controller.manager.exec_in_container.called is not no_shell
     if not no_shell:

@@ -33,6 +33,9 @@ from nihil.exceptions import (
 )
 
 
+VPN_AUTH_PATH = "/tmp/nihil_vpn_auth"
+
+
 class NihilManager:
     DEFAULT_IMAGE = DEFAULT_IMAGE
     AVAILABLE_IMAGES = AVAILABLE_IMAGES
@@ -738,18 +741,29 @@ class NihilManager:
         except Exception:
             return False
 
-    def start_vpn(self, container, config_path: str = "/opt/nihil/vpn/client.ovpn") -> bool:
-        """Start OpenVPN inside the container and wait for the tunnel."""
+    def start_vpn(self, container, config_path: str = "/opt/nihil/vpn/client.ovpn",
+                  auth: Optional[Tuple[str, str]] = None) -> bool:
+        """Start OpenVPN inside the container and wait for the tunnel.
+
+        auth is a (user, password) pair passed to OpenVPN with --auth-user-pass.
+        """
         env = container.attrs.get("Config", {}).get("Env") or []
         # Legacy entrypoints still own startup, even when their setup is slow.
         if "NIHIL_VPN=1" in env and config_path == "/opt/nihil/vpn/client.ovpn":
             return self.wait_for_vpn(container)
         container.exec_run(["mkdir", "-p", "/var/log/nihil"])
-        container.exec_run(
-            ["openvpn", "--log-append", "/var/log/nihil/vpn.log",
-             "--config", config_path],
-            detach=True,
-        )
+        command = ["openvpn", "--log-append", "/var/log/nihil/vpn.log", "--config", config_path]
+        if auth:
+            user, password = auth
+            data = f"{user}\n{password}\n".encode()
+            info = tarfile.TarInfo(VPN_AUTH_PATH.rsplit("/", 1)[1])
+            info.size, info.mode = len(data), 0o600
+            buf = io.BytesIO()
+            with tarfile.open(fileobj=buf, mode="w") as tar:
+                tar.addfile(info, io.BytesIO(data))
+            container.put_archive("/tmp", buf.getvalue())
+            command += ["--auth-user-pass", VPN_AUTH_PATH]
+        container.exec_run(command, detach=True)
         return self.wait_for_vpn(container)
 
     def _running_vpn_config(self, container) -> Optional[str]:
