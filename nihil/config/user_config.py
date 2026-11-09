@@ -20,6 +20,9 @@ _DEFAULT_CONFIG: dict = {
     "workspace": {
         "default_path": None,  # None = pas de workspace par défaut
     },
+    "container_defaults": {
+        "privileged": False,
+    },
     "shell": {
         "default_shell": "zsh",  # zsh | bash | tmux
         "logging": {
@@ -69,6 +72,7 @@ _CONFIG_COMMENT = """\
 #
 # network.default_network     : host | docker | nat | disabled
 # workspace.default_path      : absolute path used as default workspace (null = disabled)
+# container_defaults.privileged: enable Docker privileged mode for new containers
 # shell.default_shell         : zsh | bash | tmux
 # shell.logging.always_enable : always record shell sessions with asciinema
 # shell.logging.method        : asciinema | script
@@ -111,7 +115,14 @@ class NihilConfig:
                 data = yaml.safe_load(fh) or {}
         except Exception:
             data = {}
-        return _deep_merge(_DEFAULT_CONFIG, data)
+            persist_defaults = False
+        else:
+            persist_defaults = True
+        merged = _deep_merge(_DEFAULT_CONFIG, data)
+        if persist_defaults and merged != data:
+            self._data = merged
+            self.save()
+        return merged
 
     def _write_defaults(self) -> None:
         CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -147,6 +158,10 @@ class NihilConfig:
         if raw:
             return Path(raw).expanduser().resolve()
         return None
+
+    @property
+    def default_privileged(self) -> bool:
+        return bool(self._get("container_defaults", "privileged"))
 
     # ------------------------------------------------------------------
     # Propriétés: shell

@@ -380,6 +380,8 @@ class NihilController:
                 print(self.formatter.error(str(e)), file=sys.stderr)
                 return 1
         explicit_network = args.network is not None
+        if getattr(args, "privileged", None) is None:
+            args.privileged = getattr(self.config, "default_privileged", False)
         for field in ("privileged", "browser_ui", "tmux"):
             if getattr(args, field, None) is None:
                 setattr(args, field, False)
@@ -1879,6 +1881,7 @@ class NihilController:
             table.add_row("", "")
             table.add_row("[bold]network.default_network[/]", cfg.default_network)
             table.add_row("[bold]workspace.default_path[/]", str(cfg.default_workspace) if cfg.default_workspace else "[dim]none[/]")
+            table.add_row("[bold]container_defaults.privileged[/]", "[green]yes[/]" if cfg.default_privileged else "[red]no[/]")
             table.add_row("[bold]shell.default_shell[/]", cfg.default_shell)
             table.add_row("[bold]shell.logging.always_enable[/]", "[green]yes[/]" if cfg.logging_always_enable else "[red]no[/]")
             table.add_row("[bold]shell.logging.method[/]", cfg.logging_method)
