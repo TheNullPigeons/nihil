@@ -362,6 +362,23 @@ class NihilController:
         verbose_info(f"Looking for container '{container_name}'...")
         container = self.manager.get_container(container_name)
         container_existed = container is not None
+        startup_scripts = None
+        if args.script:
+            if not sys.stdin.isatty():
+                print(self.formatter.error("Use --startup-script NAME when selecting scripts without a terminal."), file=sys.stderr)
+                return 1
+            from nihil.features.startup_scripts import select_startup_scripts
+            startup_scripts = select_startup_scripts()
+            if startup_scripts is None:
+                print(self.formatter.info("Startup script selection cancelled."))
+                return 1
+        elif args.startup_script:
+            from nihil.features.startup_scripts import resolve_startup_scripts
+            try:
+                startup_scripts = resolve_startup_scripts(args.startup_script)
+            except ValueError as e:
+                print(self.formatter.error(str(e)), file=sys.stderr)
+                return 1
         explicit_network = args.network is not None
         for field in ("privileged", "browser_ui", "tmux"):
             if getattr(args, field, None) is None:
@@ -564,7 +581,7 @@ class NihilController:
             self.manager.start_container(container)
             if verbose:
                 print(self.formatter.success(f"Container '{container_name}' created and started successfully."))
-            if not getattr(args, "no_my_resources", False):
+            if not getattr(args, "no_my_resources", False) and startup_scripts is None:
                 try:
                     output = self.manager.run_user_setup_script(container)
                     if verbose and output is not None:
@@ -578,6 +595,14 @@ class NihilController:
                 self._start_vpn_with_feedback(container, auth=vpn_auth)
             if verbose and not (browser_ui_enabled and not args.no_shell):
                 self._print_container_info(container, args, created=True, update_available=get_update(container))
+        for startup_script in startup_scripts or []:
+            try:
+                output = self.manager.run_startup_script(container, startup_script)
+                if output:
+                    print(output)
+                print(self.formatter.success(f"Startup script '{startup_script.name}' completed."))
+            except RuntimeError as e:
+                print(self.formatter.warning(f"Startup script failed: {e}"))
         command = self._start_shell_command(args)
         try:
             vpn_path = self._resolve_vpn_config_path(getattr(args, "vpn", None))

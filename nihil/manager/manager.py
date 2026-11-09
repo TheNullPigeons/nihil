@@ -857,6 +857,24 @@ class NihilManager:
         except Exception as e:
             raise RuntimeError(str(e)) from e
 
+    def run_startup_script(self, container, script: Path) -> Optional[str]:
+        """Copy and run a selected startup script from the host."""
+        try:
+            archive = io.BytesIO()
+            with tarfile.open(fileobj=archive, mode="w") as tar:
+                tar.add(script, arcname=script.name)
+            container.put_archive("/tmp", archive.getvalue())
+            target = f"/tmp/{script.name}"
+            exit_code, output = container.exec_run(["bash", target], stdout=True, stderr=True)
+            decoded = output.decode("utf-8", errors="replace").strip() if output else ""
+            if exit_code != 0:
+                raise RuntimeError(decoded or f"script exited with code {exit_code}")
+            return decoded
+        except RuntimeError:
+            raise
+        except Exception as e:
+            raise RuntimeError(str(e)) from e
+
     def copy_file_into_container(self, container, host_path: str, container_path: str) -> bool:
         try:
             path = Path(host_path).expanduser().resolve()
