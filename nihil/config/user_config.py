@@ -102,6 +102,20 @@ class NihilConfig:
     def __init__(self) -> None:
         self._data = self._load()
 
+    @classmethod
+    def from_file(cls, path: Path) -> "NihilConfig":
+        """Load a config snapshot without making it the active config file."""
+        try:
+            with path.open("r", encoding="utf-8") as fh:
+                data = yaml.safe_load(fh) or {}
+        except (OSError, yaml.YAMLError) as e:
+            raise ValueError(f"Cannot read config preset '{path}': {e}") from e
+        if not isinstance(data, dict):
+            raise ValueError(f"Config preset '{path}' must contain a YAML mapping.")
+        config = cls.__new__(cls)
+        config._data = _deep_merge(_DEFAULT_CONFIG, data)
+        return config
+
     # ------------------------------------------------------------------
     # Chargement / sauvegarde
     # ------------------------------------------------------------------

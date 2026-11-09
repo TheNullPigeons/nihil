@@ -114,10 +114,10 @@ class NihilController:
             return ("Installed", self.formatter.YELLOW)
         return "Available"
 
-    def _start_shell_command(self, args) -> str:
+    def _start_shell_command(self, args, config=None) -> str:
         if getattr(args, "tmux", False):
             return "tmux new-session -A -s nihil"
-        shell = getattr(self.config, "default_shell", "zsh")
+        shell = getattr(config or self.config, "default_shell", "zsh")
         if shell == "tmux":
             return "tmux new-session -A -s nihil"
         if shell == "bash":
@@ -349,7 +349,7 @@ class NihilController:
 
         def get_update(c):
             if _update_cache[0] is _NOT_CHECKED:
-                _update_cache[0] = self._check_image_update(c) if self.config.auto_check_updates else None
+                _update_cache[0] = self._check_image_update(c) if config.auto_check_updates else None
             return _update_cache[0]
 
         container_name = args.name
@@ -362,8 +362,43 @@ class NihilController:
         verbose_info(f"Looking for container '{container_name}'...")
         container = self.manager.get_container(container_name)
         container_existed = container is not None
+        config = self.config
+        preset_options = {}
+        preset_scripts = None
+        if getattr(args, "preset", None) is not None:
+            if container_existed:
+                print(self.formatter.error("--preset can only be used when creating a new container."), file=sys.stderr)
+                return 1
+            if not args.preset and not sys.stdin.isatty():
+                print(self.formatter.error("Pass a preset name when selecting without a terminal."), file=sys.stderr)
+                return 1
+            from nihil.features.config_presets import choose_preset, load_preset, load_preset_options, load_preset_scripts
+            preset_name = args.preset or choose_preset()
+            if not preset_name:
+                print(self.formatter.error("No config preset selected."), file=sys.stderr)
+                return 1
+            try:
+                config = load_preset(preset_name)
+                preset_options = load_preset_options(preset_name)
+                preset_scripts = load_preset_scripts(preset_name, preset_options)
+            except (FileNotFoundError, ValueError) as e:
+                print(self.formatter.error(str(e)), file=sys.stderr)
+                return 1
+            for field, value in preset_options.items():
+                if field == "scripts":
+                    continue
+                if field == "env":
+                    args.env = [*(value or []), *(args.env or [])]
+                elif field == "browser_ui_resolution" and args.browser_ui_resolution_explicit:
+                    continue
+                elif field in {"workspace", "workspace_here"}:
+                    if args.workspace is None and args.workspace_here is None:
+                        setattr(args, field, value)
+                elif getattr(args, field, None) is None:
+                    setattr(args, field, value)
+            verbose_info(f"Using config preset '{preset_name}'.")
         startup_scripts = None
-        if args.script:
+        if getattr(args, "script", False):
             if not sys.stdin.isatty():
                 print(self.formatter.error("Use --startup-script NAME when selecting scripts without a terminal."), file=sys.stderr)
                 return 1
@@ -372,23 +407,25 @@ class NihilController:
             if startup_scripts is None:
                 print(self.formatter.info("Startup script selection cancelled."))
                 return 1
-        elif args.startup_script:
+        elif getattr(args, "startup_script", None):
             from nihil.features.startup_scripts import resolve_startup_scripts
             try:
                 startup_scripts = resolve_startup_scripts(args.startup_script)
             except ValueError as e:
                 print(self.formatter.error(str(e)), file=sys.stderr)
                 return 1
+        elif preset_scripts is not None:
+            startup_scripts = preset_scripts
         explicit_network = args.network is not None
-        if getattr(args, "privileged", None) is None:
-            args.privileged = getattr(self.config, "default_privileged", False)
-        for field in ("privileged", "browser_ui", "tmux"):
+        if args.privileged is None:
+            args.privileged = getattr(config, "default_privileged", False)
+        for field in ("browser_ui", "tmux", "no_shell"):
             if getattr(args, field, None) is None:
                 setattr(args, field, False)
 
         # Appliquer les defaults de config pour les options non spécifiées par l'utilisateur
         if args.network is None:
-            args.network = self.config.default_network
+            args.network = config.default_network
         if not self._apply_vpn_network_policy(args, explicit_network):
             return 1
         try:
@@ -404,8 +441,8 @@ class NihilController:
                 "Host networking is not supported on this platform. Switching to 'docker' network mode."
             ))
             args.network = "docker"
-        enable_x11 = self.config.x11_by_default if args.disable_x11 is None else not args.disable_x11
-        enable_wayland = self.config.wayland_by_default if args.disable_wayland is None else not args.disable_wayland
+        enable_x11 = config.x11_by_default if args.disable_x11 is None else not args.disable_x11
+        enable_wayland = config.wayland_by_default if args.disable_wayland is None else not args.disable_wayland
         args.enable_x11 = enable_x11
         args.enable_wayland = enable_wayland
         if _host_os == HostOS.MACOS and enable_x11:
@@ -413,11 +450,11 @@ class NihilController:
                 "macOS detected: using XQuartz for X11. Make sure XQuartz is running and run 'xhost +localhost' on your host."
             ))
         if args.no_my_resources is None:
-            args.no_my_resources = not self.config.my_resources_enabled
+            args.no_my_resources = not config.my_resources_enabled
         if args.no_nihil_resources is None:
-            args.no_nihil_resources = not self.config.nihil_resources_enabled
+            args.no_nihil_resources = not config.nihil_resources_enabled
         if not getattr(args, "no_nihil_resources", False):
-            nr_path = self.config.nihil_resources_path
+            nr_path = config.nihil_resources_path
             if not nr_path.exists():
                 if self._prompt_install_nihil_resources(nr_path):
                     rc = self._clone_nihil_resources(nr_path)
@@ -426,12 +463,12 @@ class NihilController:
                         args.no_nihil_resources = True
                 else:
                     args.no_nihil_resources = True
-            elif self.config.nihil_resources_auto_update:
+            elif config.nihil_resources_auto_update:
                 self._nihil_resources_pull(nr_path, quiet=True)
         if args.log is None:
-            args.log = self.config.logging_always_enable
-        if args.workspace is None and not args.workspace_here and self.config.default_workspace:
-            args.workspace = str(self.config.default_workspace)
+            args.log = config.logging_always_enable
+        if args.workspace is None and not args.workspace_here and config.default_workspace:
+            args.workspace = str(config.default_workspace)
         if container:
             verbose_info(f"Container '{container_name}' found.")
             if getattr(args, "env", None):
@@ -524,8 +561,8 @@ class NihilController:
             
             # Utiliser le default de la config, ou créer un propre au container par défaut
             if workspace_path is None:
-                if getattr(self.config, "default_workspace", None):
-                    workspace_path = str(self.config.default_workspace)
+                if getattr(config, "default_workspace", None):
+                    workspace_path = str(config.default_workspace)
                 else:
                     from nihil.config.defaults import NIHIL_HOME
                     default_ws = NIHIL_HOME / "workspaces" / container_name
@@ -535,7 +572,7 @@ class NihilController:
             if workspace_path is not None:
                 workspace_path = str(Path(workspace_path).expanduser().resolve())
             browser_ui_enabled = getattr(args, "browser_ui", False)
-            browser_ui_resolution = getattr(args, "browser_ui_resolution", "1280x720")
+            browser_ui_resolution = getattr(args, "browser_ui_resolution", None) or "1280x720"
             enable_x11, enable_wayland, display_messages = self._resolve_display_forwarding(
                 enable_x11, enable_wayland, browser_ui_enabled
             )
@@ -555,23 +592,23 @@ class NihilController:
             if environment is None:
                 return 1
             environment.update({
-                "NIHIL_HISTORY_SYNC_CREDENTIALS": str(int(self.config.nihil_history_sync_credentials)),
-                "NIHIL_HISTORY_SYNC_HOSTS": str(int(self.config.nihil_history_sync_hosts)),
+                "NIHIL_HISTORY_SYNC_CREDENTIALS": str(int(config.nihil_history_sync_credentials)),
+                "NIHIL_HISTORY_SYNC_HOSTS": str(int(config.nihil_history_sync_hosts)),
             })
             container = self.manager.create_container(
                 name=container_name,
                 image=image,
                 privileged=args.privileged,
-                network_mode=network_map.get(args.network, "host"),
+                network_mode=network_map.get(args.network, args.network),
                 workspace=workspace_path,
                 vpn=bool(vpn_path),
                 vpn_config_path=vpn_path,
                 enable_x11=enable_x11,
                 enable_wayland=enable_wayland,
                 disable_my_resources=getattr(args, "no_my_resources", False),
-                my_resources_path=self.config.my_resources_path,
+                my_resources_path=config.my_resources_path,
                 disable_nihil_resources=getattr(args, "no_nihil_resources", False),
-                nihil_resources_path=self.config.nihil_resources_path,
+                nihil_resources_path=config.nihil_resources_path,
                 browser_ui=browser_ui_enabled,
                 browser_ui_resolution=browser_ui_resolution if browser_ui_enabled else None,
                 browser_ui_port=browser_ui_port if browser_ui_enabled else None,
@@ -605,7 +642,7 @@ class NihilController:
                 print(self.formatter.success(f"Startup script '{startup_script.name}' completed."))
             except RuntimeError as e:
                 print(self.formatter.warning(f"Startup script failed: {e}"))
-        command = self._start_shell_command(args)
+        command = self._start_shell_command(args, config=config)
         try:
             vpn_path = self._resolve_vpn_config_path(getattr(args, "vpn", None))
         except (FileNotFoundError, ValueError) as e:
@@ -1861,6 +1898,8 @@ class NihilController:
 
     def _cmd_config(self, args) -> int:
         from nihil.config import CONFIG_FILE
+        if getattr(args, "config_action", None) == "preset":
+            return self._cmd_config_preset(args)
         if getattr(args, "edit", False):
             import shutil
             import subprocess
@@ -1897,6 +1936,78 @@ class NihilController:
             print(self.formatter.info(f"Edit: nihil config --edit  or  $EDITOR {CONFIG_FILE}"))
         except ImportError:
             print(f"Config file: {CONFIG_FILE}")
+        return 0
+
+    def _cmd_config_preset(self, args) -> int:
+        from nihil.features.config_presets import (
+            create_preset, delete_preset, list_presets, save_preset, preset_path,
+        )
+
+        try:
+            if args.preset_action == "create":
+                from nihil.features.config_presets import edit_preset_config
+                fields = (
+                    "privileged", "network", "image", "workspace", "workspace_here", "vpn", "env",
+                    "disable_x11", "disable_wayland", "no_my_resources", "no_nihil_resources",
+                    "browser_ui", "browser_ui_resolution", "browser_ui_port", "browser_ui_password",
+                    "log", "tmux", "no_shell",
+                )
+                options = {
+                    field: getattr(args, field)
+                    for field in fields
+                    if getattr(args, field) is not None
+                    and (field != "browser_ui_resolution" or args.browser_ui_resolution_explicit)
+                }
+                scripts = None
+                if args.script:
+                    if not sys.stdin.isatty():
+                        print(self.formatter.error("Use --startup-script NAME when selecting scripts without a terminal."), file=sys.stderr)
+                        return 1
+                    from nihil.features.startup_scripts import select_startup_scripts
+                    from nihil.features.config_presets import SETUP_DIR
+                    scripts = select_startup_scripts()
+                    if scripts is None:
+                        print(self.formatter.info("Preset creation cancelled."))
+                        return 1
+                    options["scripts"] = [str(script.relative_to(SETUP_DIR)) for script in scripts]
+                elif args.startup_script:
+                    from nihil.features.config_presets import SETUP_DIR
+                    from nihil.features.startup_scripts import resolve_startup_scripts
+                    scripts = resolve_startup_scripts(args.startup_script)
+                    options["scripts"] = [str(script.relative_to(SETUP_DIR)) for script in scripts]
+                noninteractive_options = set(options) - {"scripts"}
+                config_data = None
+                if not noninteractive_options and not args.startup_script and sys.stdin.isatty():
+                    edited = edit_preset_config()
+                    if edited is None:
+                        print(self.formatter.info("Preset creation cancelled."))
+                        return 1
+                    config_data, edited_options = edited
+                    options.update(edited_options)
+                path = create_preset(args.name, options=options, config_data=config_data)
+                print(self.formatter.success(f"Created config preset '{args.name}'."))
+            elif args.preset_action == "save":
+                path = save_preset(args.name, overwrite=args.force)
+                print(self.formatter.success(f"Saved config preset '{args.name}' to {path}."))
+            elif args.preset_action == "edit":
+                path = preset_path(args.name)
+                import shutil
+                import subprocess
+                editor = os.environ.get("EDITOR") or shutil.which("nano") or shutil.which("vi") or "vi"
+                if subprocess.run([editor, str(path)]).returncode:
+                    print(self.formatter.error(f"Editor failed. Preset remains at {path}."), file=sys.stderr)
+                    return 1
+                NihilConfig.from_file(path)
+                print(self.formatter.success(f"Updated config preset '{args.name}'."))
+            elif args.preset_action == "list":
+                presets = list_presets()
+                print("\n".join(presets) if presets else self.formatter.info("No config presets saved yet."))
+            elif args.preset_action == "delete":
+                delete_preset(args.name)
+                print(self.formatter.success(f"Deleted config preset '{args.name}'."))
+        except (FileExistsError, FileNotFoundError, OSError, ValueError) as e:
+            print(self.formatter.error(str(e)), file=sys.stderr)
+            return 1
         return 0
 
     def _cmd_build(self, args) -> int:
