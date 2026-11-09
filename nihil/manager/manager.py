@@ -487,6 +487,7 @@ class NihilManager:
             container_config["environment"]["NIHIL_BROWSER_UI"] = "1"
             container_config["environment"]["NIHIL_BROWSER_UI_RESOLUTION"] = browser_ui_resolution or "1280x720"
             container_config["environment"]["NIHIL_BROWSER_UI_PORT"] = str(browser_ui_port)
+            container_config["environment"]["NIHIL_BROWSER_UI_VNC_PORT"] = str(browser_ui_port - 1000)
             # In "host" network mode the container shares the host's network namespace
             # directly, so whatever address the in-container noVNC proxy binds to is the
             # address it binds to *on the host* too: restrict it to loopback there. In
