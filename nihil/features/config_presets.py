@@ -9,8 +9,8 @@ import yaml
 from nihil.config import CONFIG_FILE, NIHIL_HOME, NihilConfig
 
 
-PRESET_DIR = NIHIL_HOME / "config-presets"
-_LEGACY_DIRS = (NIHIL_HOME / "config-templates", NIHIL_HOME / "config-profiles")
+PRESET_DIR = NIHIL_HOME / "presets"
+_LEGACY_DIRS = (NIHIL_HOME / "config-presets", NIHIL_HOME / "config-templates", NIHIL_HOME / "config-profiles")
 SETUP_DIR = NIHIL_HOME / "my-resources" / "setup"
 _PRESET_OPTIONS_KEY = "container"
 _BOOLEAN_OPTIONS = {
