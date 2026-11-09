@@ -633,14 +633,25 @@ class NihilController:
                         except ValueError:
                             pass
             if browser_ui_port:
-                verbose_info("Preparing browser UI...")
-                deadline = time.monotonic() + 180
-                while time.monotonic() < deadline:
-                    if browser_ui_is_page_ready(browser_ui_port):
-                        if verbose:
-                            print(self.formatter.success("Browser UI ready."))
-                        break
-                    time.sleep(2)
+                ready = False
+                loading = self._loading("Starting Browser UI...")
+                with loading:
+                    deadline = time.monotonic() + 180
+                    while time.monotonic() < deadline:
+                        try:
+                            exit_code, output = container.exec_run(["cat", "/tmp/nihil_browser_ui_status"])
+                            progress = output.decode("utf-8", errors="replace").strip() if exit_code == 0 else ""
+                            if progress and hasattr(loading, "update"):
+                                loading.update(f"[cyan]{progress}...[/]")
+                        except Exception:
+                            pass
+                        if browser_ui_is_page_ready(browser_ui_port):
+                            ready = True
+                            break
+                        time.sleep(2)
+                if ready:
+                    if verbose:
+                        print(self.formatter.success("Browser UI ready."))
                 else:
                     print(self.formatter.warning("Browser UI may still be starting; open the link from the recap when ready."))
                 session_str = browser_ui_get_session_str(container, container_name)

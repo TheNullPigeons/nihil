@@ -83,6 +83,25 @@ def test_logged_shell_sets_recording_prompt_flag(controller):
     assert "--command 'NIHIL_SESSION_RECORDING=1 zsh'" in command
 
 
+def test_start_shows_loading_status_while_browser_ui_starts(controller, monkeypatch):
+    controller.config.default_privileged = False
+    container = controller.manager.get_container.return_value
+    container.name = "box"
+    container.attrs["Config"]["Env"] = ["NIHIL_BROWSER_UI=1", "NIHIL_BROWSER_UI_PORT=6979"]
+    container.exec_run.return_value = (0, b"Starting Browser UI")
+    monkeypatch.setattr("nihil.cli.controller.browser_ui_is_page_ready", lambda port: port == 6979)
+    args = create_parser().parse_args(["start", "box"])
+
+    status = MagicMock()
+    loading = MagicMock(return_value=status)
+    monkeypatch.setattr(controller, "_loading", loading)
+    monkeypatch.setattr(controller, "_print_container_info", MagicMock())
+    assert controller._cmd_start(args) == 0
+
+    loading.assert_called_once_with("Starting Browser UI...")
+    status.update.assert_called_once_with("[cyan]Starting Browser UI...[/]")
+
+
 @pytest.fixture
 def controller(monkeypatch):
     ctrl = object.__new__(NihilController)
