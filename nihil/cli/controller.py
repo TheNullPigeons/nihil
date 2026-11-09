@@ -1303,7 +1303,7 @@ class NihilController:
                 config_changes.append("privileged: disabled")
 
             if requested_network:
-                new_network_mode = network_map.get(requested_network, "host")
+                new_network_mode = network_map.get(requested_network, requested_network)
                 if snapshot.get("network_mode") != new_network_mode:
                     snapshot["network_mode"] = new_network_mode
                     config_changes.append(f"network: {requested_network}")
