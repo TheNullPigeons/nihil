@@ -841,7 +841,8 @@ class NihilController:
             "NIHIL_VPN", "DISPLAY", "NIHIL_X_MODE", "XAUTHORITY",
             "_JAVA_AWT_WM_NONREPARENTING", "QT_X11_NO_MITSHM",
             "XDG_RUNTIME_DIR", "WAYLAND_DISPLAY", "NIHIL_WAYLAND",
-            "NIHIL_BROWSER_UI", "NIHIL_BROWSER_UI_PORT", "NIHIL_BROWSER_UI_PASSWORD",
+            "NIHIL_BROWSER_UI", "NIHIL_BROWSER_UI_PORT",
+            "NIHIL_BROWSER_UI_VNC_PORT", "NIHIL_BROWSER_UI_PASSWORD",
         }
         try:
             image_env_list = container.image.attrs.get("Config", {}).get("Env") or []
