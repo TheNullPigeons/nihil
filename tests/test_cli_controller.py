@@ -335,22 +335,37 @@ class TestBuildPlatform:
         return controller
 
     @staticmethod
-    def _run_build(controller, variant, tag=None):
+    def _run_build(controller, variant, tag=None, allow_tool_failures=False, output=b""):
         args = SimpleNamespace(
             variant=variant,
             source=None,
             tag=tag,
             no_cache=False,
+            allow_tool_failures=allow_tool_failures,
             log=None,
         )
         process = MagicMock()
-        process.stdout.read1.return_value = b""
+        process.stdout.read1.side_effect = [output, b""]
         process.returncode = 0
 
         with patch("subprocess.Popen", return_value=process) as popen:
             assert controller._cmd_build(args) == 0
 
         return popen.call_args.args[0]
+
+    def test_short_build_output_keeps_audit_warnings(self, tmp_path, capsys):
+        (tmp_path / "Dockerfile").touch()
+        controller = self._make_controller(tmp_path)
+        controller.formatter._colorize.side_effect = lambda text, color: text
+        self._run_build(controller, "full", allow_tool_failures=True,
+                        output=b"#7 1.0 [NIHIL AUDIT] Installer failed: mod_misc/install_wes (exit 1)\n")
+        assert "Installer failed: mod_misc/install_wes (exit 1)" in capsys.readouterr().out
+
+    @pytest.mark.parametrize("allow", [False, True])
+    def test_tool_failure_mode_is_opt_in(self, tmp_path, allow):
+        (tmp_path / "Dockerfile").touch()
+        cmd = self._run_build(self._make_controller(tmp_path), "full", allow_tool_failures=allow)
+        assert ("NIHIL_AUDIT=1" in cmd) is allow
 
     @pytest.mark.parametrize(
         ("variant", "dockerfile"),

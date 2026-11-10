@@ -592,3 +592,37 @@ def test_web_customization_pushes_and_builds_without_terminal_confirmation(tmp_p
     source.activate_personal.assert_called_once_with(path, "alice/nihil-images", "nihil/web-custom")
     source.trigger_build.assert_called_once()
     assert git.call_count == 4
+
+
+def test_trigger_build_enables_tool_failure_input_only_when_requested(tmp_path):
+    config = SimpleNamespace(image_sources_home=tmp_path, image_source_active="upstream", image_channel="dev")
+    manager = ImageSourceManager(config)
+    calls = []
+    manager._run = lambda command, **kwargs: calls.append(command) or ""
+    manager.trigger_build(variant="web", allow_tool_failures=True)
+    assert calls == [[
+        "gh", "workflow", "run", "docker-build.yml",
+        "--repo", "TheNullPigeons/nihil-images", "--ref", "dev",
+        "-f", "variant=web", "-f", "allow_tool_failures=true",
+    ]]
+
+
+@pytest.mark.parametrize("web", [False, True])
+def test_image_build_cli_forwards_tool_failure_mode(tmp_path, monkeypatch, web):
+    from unittest.mock import Mock
+    from nihil.cli.controller import NihilController
+
+    source = Mock()
+    source.trigger_build.return_value = ("alice/nihil-images", "dev")
+    monkeypatch.setattr("nihil.features.image_sources.ImageSourceManager", Mock(return_value=source))
+    def browser(*args, **kwargs):
+        kwargs["on_save"](set(), Mock(), threading.Event())
+    monkeypatch.setattr("nihil.features.tool_selector_web.select_tools_web", browser)
+    controller = NihilController.__new__(NihilController)
+    controller.config = Mock()
+    controller.formatter = Mock()
+    command = ["image", "build", "full", "--allow-tool-failures"]
+    if web:
+        command.append("--web")
+    assert controller._cmd_image(create_parser().parse_args(command)) == 0
+    assert source.trigger_build.call_args.kwargs["allow_tool_failures"] is True

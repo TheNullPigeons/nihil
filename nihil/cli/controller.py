@@ -2278,6 +2278,8 @@ class NihilController:
             "--build-arg", "VERSION=local",
             "--build-arg", f"BUILD_DATE={build_date}",
         ]
+        if getattr(args, "allow_tool_failures", False):
+            cmd.extend(["--build-arg", "NIHIL_AUDIT=1"])
         from nihil.utils import get_image_platform
         image_platform = get_image_platform()
         if image_platform:
@@ -2297,6 +2299,8 @@ class NihilController:
         print(build_info("Build plan", f"{len(step_labels)} phases ({module_count} modules)", self.formatter.BLUE))
         print(build_info("Source", str(source), self.formatter.GREEN))
         print(build_info("Dockerfile", DOCKERFILES[variant], self.formatter.MAGENTA))
+        if getattr(args, "allow_tool_failures", False):
+            print(build_info("Tool failures", "Allowed for non-core tools; report: /opt/nihil/build/config/build-failures.log", self.formatter.YELLOW))
         if log_path:
             print(build_info("Build log", f"{log_path}  (tail -f {log_path})", self.formatter.CYAN))
         print()
@@ -2357,6 +2361,9 @@ class NihilController:
                 if label.startswith("RUN"):
                     label = "RUN Nihil build phases" if "./entrypoint.sh" in label else "RUN prepare runtime"
                 print(build_info(f"Dockerfile {index}/{total}", label, self.formatter.MAGENTA))
+                return
+            if "[NIHIL AUDIT]" in line:
+                print(build_info("Tools", line.split("[NIHIL AUDIT]", 1)[1].strip(), self.formatter.YELLOW))
                 return
             marker = re.search(r"\[NIHIL\]\s+Starting build step:\s+([\w]+)", line)
             if marker:
@@ -2470,6 +2477,7 @@ class NihilController:
                     def run_github_build(_selection, report, cancel_event):
                         manager.trigger_build(
                             variant=args.variant, wait=True,
+                            allow_tool_failures=getattr(args, "allow_tool_failures", False),
                             progress_callback=report, cancel_event=cancel_event,
                         )
 
@@ -2484,7 +2492,10 @@ class NihilController:
                     print(self.formatter.success(f"Image build finished: {args.variant}"))
                     return 0
 
-                repo, branch = manager.trigger_build(variant=args.variant, wait=args.wait)
+                repo, branch = manager.trigger_build(
+                    variant=args.variant, wait=args.wait,
+                    allow_tool_failures=getattr(args, "allow_tool_failures", False),
+                )
                 print(self.formatter.success(
                     f"Docker build workflow dispatched for {repo}:{branch}"
                 ))

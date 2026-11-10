@@ -305,7 +305,7 @@ class ImageSourceManager:
         )
 
     def trigger_build(
-        self, *, variant: str = "all", wait: bool = False,
+        self, *, variant: str = "all", wait: bool = False, allow_tool_failures: bool = False,
         progress_callback=None, cancel_event=None,
     ) -> tuple[str, str]:
         """Trigger the Docker workflow for the active source and return its repo/ref."""
@@ -325,11 +325,14 @@ class ImageSourceManager:
         if progress_callback:
             progress_callback(0, 0, "Dispatching GitHub Actions")
         dispatch_started = datetime.now(timezone.utc)
-        self._run([
+        command = [
             "gh", "workflow", "run", "docker-build.yml",
             "--repo", repo, "--ref", branch,
             "-f", f"variant={variant}",
-        ])
+        ]
+        if allow_tool_failures:
+            command.extend(["-f", "allow_tool_failures=true"])
+        self._run(command)
         if wait:
             run_id = ""
             deadline = time.monotonic() + 30
