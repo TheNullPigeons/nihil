@@ -10,7 +10,7 @@ import json
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 
 UPSTREAM_REPO = "TheNullPigeons/nihil-images"
@@ -203,6 +203,7 @@ class ImageSourceManager:
         self,
         *,
         variant: str,
+        base_branch: str | None = None,
         git_protocol: str | None = None,
         delete_existing: bool | str = False,
     ) -> tuple[Path, str, str]:
@@ -211,6 +212,12 @@ class ImageSourceManager:
             git_protocol = self._default_git_protocol()
         if git_protocol not in {"ssh", "https"}:
             raise ImageSourceError("Git protocol must be 'ssh', 'https' or 'auto'.")
+        if base_branch is not None:
+            try:
+                self._run(["git", "check-ref-format", f"refs/heads/{base_branch}"])
+                self._run(["gh", "api", f"repos/{self.upstream_repo}/git/ref/heads/{quote(base_branch, safe='/')}"])
+            except ImageSourceError as exc:
+                raise ImageSourceError(f"Cannot use upstream branch '{base_branch}': {exc}") from exc
         login = self._gh_user()
         repo_name = self.upstream_repo.rsplit("/", 1)[1]
         fork_repo = f"{login}/{repo_name}"
@@ -256,7 +263,7 @@ class ImageSourceManager:
         self._ensure_git_remote(path, "upstream", upstream_url)
         self._run(["git", "fetch", "upstream"], cwd=path)
 
-        default_branch = self._default_branch(self.upstream_repo)
+        default_branch = base_branch if base_branch is not None else self._default_branch(self.upstream_repo)
         self._run(["git", "fetch", "origin"], cwd=path)
         branches = self._run(["git", "branch", "--format=%(refname:short)"], cwd=path).splitlines()
         remote_branches = self._run(

@@ -146,12 +146,20 @@ Examples:
     customize_parser.add_argument(
         "--no-push", action="store_true", help="Prepare the branch locally without committing or pushing"
     )
-    customize_parser.add_argument(
+    customize_selection = customize_parser.add_mutually_exclusive_group()
+    customize_selection.add_argument(
         "--web", action="store_true", help="Select tools in a local browser instead of the terminal UI"
+    )
+    customize_selection.add_argument(
+        "--keep-tools", action="store_true", help="Reuse the saved tool selection without opening a selector"
     )
     customize_parser.add_argument(
         "--repo", default=None, metavar="REPO",
         help="GitHub repository (owner/repo or URL; default: TheNullPigeons/nihil-images)",
+    )
+    customize_parser.add_argument(
+        "--branch", default=None, metavar="BRANCH",
+        help="Upstream branch to customize and merge (default: repository default branch)",
     )
     customize_parser.add_argument(
         "--git-protocol", choices=["ssh", "https", "auto"], default="auto",

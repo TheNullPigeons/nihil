@@ -72,7 +72,9 @@ def test_auto_protocol_reads_github_host_configuration(tmp_path):
     assert ["gh", "config", "get", "git_protocol", "--host", "github.com"] in calls
 
 
-def test_existing_fork_is_reused_and_custom_branch_is_created(tmp_path):
+@pytest.mark.parametrize("base_branch", [None, "dev", "feature/custom-tools"])
+@pytest.mark.parametrize("existing", [False, True])
+def test_existing_fork_is_reused_and_custom_branch_is_created(tmp_path, base_branch, existing):
     home = tmp_path / "sources"
     path = home / "alice" / "nihil-images"
     (path / ".git").mkdir(parents=True)
@@ -104,21 +106,27 @@ def test_existing_fork_is_reused_and_custom_branch_is_created(tmp_path):
         if command[:4] == ["git", "remote", "get-url", "upstream"]:
             return "https://github.com/TheNullPigeons/nihil-images.git"
         if command[:2] == ["git", "branch"]:
-            return ""
+            return "nihil/web-custom" if existing else ""
         if command[:4] == ["gh", "repo", "view", "TheNullPigeons/nihil-images"]:
             return "main"
         return ""
 
     manager._run = fake_run
-    result_path, repo, branch = manager.ensure_personal_fork(variant="web")
+    result_path, repo, branch = manager.ensure_personal_fork(variant="web", base_branch=base_branch)
 
     assert result_path == path
     assert repo == "alice/nihil-images"
     assert branch == "nihil/web-custom"
     assert saved == {}
     assert ["gh", "repo", "fork", "TheNullPigeons/nihil-images", "--clone=false"] not in calls
-    assert ["git", "switch", "-c", "nihil/web-custom", "upstream/main"] in calls
-    assert ["git", "merge", "--no-edit", "upstream/main"] in calls
+    upstream = f"upstream/{base_branch or 'main'}"
+    if existing:
+        assert ["git", "switch", "nihil/web-custom"] in calls
+    else:
+        assert ["git", "switch", "-c", "nihil/web-custom", upstream] in calls
+    assert ["git", "merge", "--no-edit", upstream] in calls
+    parsed = create_parser().parse_args(["image", "customize", "web"] + (["--branch", base_branch] if base_branch else []))
+    assert parsed.branch == base_branch
 
 
 def test_existing_remote_custom_branch_is_checked_out_after_local_reset(tmp_path):
@@ -592,6 +600,77 @@ def test_web_customization_pushes_and_builds_without_terminal_confirmation(tmp_p
     source.activate_personal.assert_called_once_with(path, "alice/nihil-images", "nihil/web-custom")
     source.trigger_build.assert_called_once()
     assert git.call_count == 4
+
+
+def test_invalid_upstream_branch_does_not_delete_existing_clone(tmp_path):
+    manager = ImageSourceManager(SimpleNamespace(image_sources_home=tmp_path))
+    marker = tmp_path / "keep.txt"
+    marker.write_text("local work")
+    calls = []
+
+    def reject_branch(command, **kwargs):
+        calls.append(command)
+        if command[:2] == ["gh", "api"]:
+            raise ImageSourceError("branch not found")
+        return ""
+
+    manager._run = reject_branch
+    with pytest.raises(ImageSourceError, match="Cannot use upstream branch"):
+        manager.ensure_personal_fork(variant="web", base_branch="missing", git_protocol="https", delete_existing="all")
+    assert marker.read_text() == "local work"
+    assert not any(command[:2] == ["git", "clone"] for command in calls)
+
+
+@pytest.mark.parametrize("selection", ['{ "enabled_tools": ["vim"] }\n', '{"disabled_tools":["httpx"]}', None, '{', '[]'])
+@pytest.mark.parametrize("no_push", [False, True])
+def test_keep_tools_skips_selector_and_preserves_selection(tmp_path, monkeypatch, selection, no_push):
+    import subprocess
+    from unittest.mock import Mock
+    from nihil.cli.controller import NihilController
+
+    path = tmp_path / "image"
+    config = path / "build" / "config"
+    config.mkdir(parents=True)
+    (config / "tools.json").write_text(json.dumps({
+        "core_tools": [{"name": "vim"}], "mod_web": [{"name": "httpx"}],
+    }))
+    selection_path = config / "tool-selection.json"
+    if selection is not None:
+        selection_path.write_text(selection)
+    source = Mock()
+    source.ensure_personal_fork.return_value = (path, "alice/nihil-images", "nihil/web-custom")
+    controller = NihilController.__new__(NihilController)
+    controller.manager = Mock()
+    controller.formatter = Mock(console=None)
+    controller._select_tools_tui = Mock(side_effect=AssertionError("selector opened"))
+    controller._select_tools_web = Mock(side_effect=AssertionError("selector opened"))
+    monkeypatch.setattr("rich.prompt.Confirm.ask", lambda *args, **kwargs: True)
+    git = Mock(return_value=subprocess.CompletedProcess([], 0))
+    monkeypatch.setattr(subprocess, "run", git)
+    args = create_parser().parse_args([
+        "image", "customize", "web", "--branch", "dev", "--keep-tools",
+    ] + (["--no-push"] if no_push else []))
+    valid = selection is not None and selection not in ('{', '[]')
+    assert controller._customize_image(args, source) == (0 if valid else 1)
+    source.ensure_personal_fork.assert_called_once_with(
+        variant="web", git_protocol="auto", base_branch="dev", delete_existing=False,
+    )
+    if selection is not None:
+        assert selection_path.read_text() == selection
+    else:
+        assert not selection_path.exists()
+    if valid:
+        source.activate_personal.assert_called_once()
+    else:
+        source.activate_personal.assert_not_called()
+    commands = [call.args[0] for call in git.call_args_list]
+    assert (["git", "push", "--set-upstream", "origin", "nihil/web-custom"] in commands) == (valid and not no_push)
+    assert not any(command[:2] == ["git", "commit"] for command in commands)
+
+
+def test_keep_tools_cannot_open_web_selector():
+    with pytest.raises(SystemExit):
+        create_parser().parse_args(["image", "customize", "--keep-tools", "--web"])
 
 
 def test_trigger_build_enables_tool_failure_input_only_when_requested(tmp_path):

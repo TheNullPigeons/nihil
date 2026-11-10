@@ -2565,6 +2565,7 @@ class NihilController:
                 path, fork_repo, branch = source_manager.ensure_personal_fork(
                     variant=args.variant,
                     git_protocol=args.git_protocol,
+                    base_branch=getattr(args, "branch", None),
                     delete_existing=delete_mode or False,
                 )
         except ImageSourceError as exc:
@@ -2578,6 +2579,7 @@ class NihilController:
                             path, fork_repo, branch = source_manager.ensure_personal_fork(
                                 variant=args.variant,
                                 git_protocol=args.git_protocol,
+                                base_branch=getattr(args, "branch", None),
                                 delete_existing=delete_mode or False,
                             )
                     except (subprocess.CalledProcessError, ImageSourceError) as retry_exc:
@@ -2612,10 +2614,21 @@ class NihilController:
         tools.sort(key=lambda item: (item["category"], item["name"].lower()))
 
         selection_path = path / "build" / "config" / "tool-selection.json"
+        keep_tools = getattr(args, "keep_tools", False)
+        if keep_tools and not selection_path.is_file():
+            print(self.formatter.error("No saved tool selection found. Run customize without --keep-tools first."), file=sys.stderr)
+            return 1
         disabled: set[str] = set()
         if selection_path.is_file():
             try:
                 selection = json.loads(selection_path.read_text(encoding="utf-8"))
+                if keep_tools and (
+                    not isinstance(selection, dict)
+                    or not any(key in selection for key in ("enabled_tools", "disabled_tools"))
+                    or any(not isinstance(selection[key], list) or not all(isinstance(name, str) for name in selection[key])
+                           for key in ("enabled_tools", "disabled_tools") if key in selection)
+                ):
+                    raise ValueError("Invalid saved tool selection")
                 if "enabled_tools" in selection:
                     enabled = {str(name) for name in selection.get("enabled_tools", [])}
                     selected_names = {name.lower() for name in enabled}
@@ -2628,7 +2641,10 @@ class NihilController:
                         name for name in selection.get("disabled_tools", [])
                         if str(name).lower() != "nihil-history"
                     }
-            except (OSError, json.JSONDecodeError):
+            except (OSError, ValueError) as exc:
+                if keep_tools:
+                    print(self.formatter.error(f"Cannot reuse saved tool selection: {exc}"), file=sys.stderr)
+                    return 1
                 disabled = set()
 
         mandatory_names = {tool["name"].lower() for tool in tools if tool["mandatory"]}
@@ -2656,9 +2672,9 @@ class NihilController:
                     ["git", "commit", "-m", f"Customize {args.variant} image tools", "--", selection_file],
                     cwd=path, check=True,
                 )
-                subprocess.run(["git", "push", "--set-upstream", "origin", branch], cwd=path, check=True)
             elif changed.returncode != 0:
                 raise subprocess.CalledProcessError(changed.returncode, changed.args)
+            subprocess.run(["git", "push", "--set-upstream", "origin", branch], cwd=path, check=True)
 
         if getattr(args, "web", False):
             def apply_and_build(selected: set[str], report, cancel_event) -> None:
@@ -2698,14 +2714,17 @@ class NihilController:
             return 0
 
         while True:
-            selected = self._select_tools_tui(tools, disabled, title=f"{fork_repo}:{branch}")
+            selected = disabled if keep_tools else self._select_tools_tui(tools, disabled, title=f"{fork_repo}:{branch}")
             if selected is None:
                 print("Tool selection cancelled.")
                 return 0
             disabled = selected
 
-            enabled_count = save_selection(disabled)
-            print(self.formatter.success(f"Saved tool selection: {enabled_count} enabled"))
+            if keep_tools:
+                print(self.formatter.info("Reusing saved tool selection."))
+            else:
+                enabled_count = save_selection(disabled)
+                print(self.formatter.success(f"Saved tool selection: {enabled_count} enabled"))
 
             if args.no_push:
                 source_manager.activate_personal(path, fork_repo, branch)
@@ -2724,7 +2743,7 @@ class NihilController:
                 return 0
 
             print(self.formatter.info(f"Changes remain local on {branch}: {path}"))
-            if not Confirm.ask("Relaunch the tool selector?", default=True):
+            if keep_tools or not Confirm.ask("Relaunch the tool selector?", default=True):
                 source_manager.activate_personal(path, fork_repo, branch)
                 return 0
 
