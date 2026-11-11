@@ -1767,6 +1767,7 @@ class NihilController:
             "ad": "Nest in their Active Directory",
             "web": "Beak through their web apps",
             "defender": "Blue Team, DFIR and threat hunting",
+            "mobile": "Carry it into their pocket. Android and iOS",
         }
         local_v = self.manager.list_local_variants()
         all_v = {**self.manager.AVAILABLE_IMAGES, **{k: v for k, v in local_v.items() if k not in self.manager.AVAILABLE_IMAGES}}
@@ -1805,6 +1806,7 @@ class NihilController:
             "ad": "Nest in their Active Directory",
             "web": "Beak through their web apps",
             "defender": "Blue Team, DFIR and threat hunting",
+            "mobile": "Carry it into their pocket. Android and iOS",
         }
         print(self.formatter.section_header("AVAILABLE IMAGE VARIANTS"))
         rows = []
