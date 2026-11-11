@@ -39,6 +39,11 @@ def test_parser_requires_a_name():
         create_parser().parse_args(["restart"])
 
 
+def test_parser_accepts_browser_ui_resolution():
+    args = create_parser().parse_args(["restart", "box", "--browser-ui-resolution", "1920x1080"])
+    assert args.browser_ui_resolution == "1920x1080"
+
+
 @pytest.mark.parametrize("status", ["running", "exited"])
 def test_restart_running_or_stopped_container(controller, status):
     container = controller.manager.get_container.return_value
@@ -47,6 +52,28 @@ def test_restart_running_or_stopped_container(controller, status):
     assert controller.manager.stop_container.called == (status == "running")
     controller.manager.start_container.assert_called_once_with(container)
     controller.manager.exec_in_container.assert_not_called()
+
+
+def test_restart_recreates_browser_ui_at_requested_resolution(controller):
+    container = controller.manager.get_container.return_value
+    container.attrs["Config"]["Env"] = ["NIHIL_BROWSER_UI=1"]
+    controller.manager.snapshot_container_config.return_value = {"environment": {"NIHIL_BROWSER_UI": "1"}}
+    new_container = SimpleNamespace(status="running", attrs={"Config": {"Env": []}})
+    controller.manager.recreate_container.return_value = new_container
+
+    args = SimpleNamespace(names=["box"], no_shell=True, browser_ui_resolution="1920x1080")
+    assert controller._cmd_restart(args) == 0
+
+    snapshot = controller.manager.recreate_container.call_args.args[0]
+    assert snapshot["environment"]["NIHIL_BROWSER_UI_RESOLUTION"] == "1920x1080"
+    controller.manager.remove_container.assert_called_once_with(container, force=True)
+    controller.manager.start_container.assert_called_once_with(new_container)
+
+
+def test_restart_resolution_requires_browser_ui(controller):
+    args = SimpleNamespace(names=["box"], no_shell=True, browser_ui_resolution="1920x1080")
+    assert controller._cmd_restart(args) == 1
+    controller.manager.recreate_container.assert_not_called()
 
 
 @pytest.mark.parametrize("shell,command", [
@@ -71,6 +98,15 @@ def test_vpn_restart(controller, flag, ready):
     else:
         controller.manager.wait_for_vpn.assert_not_called()
     assert controller._start_vpn_with_feedback.called == bool(flag and not ready)
+
+
+def test_restart_waits_for_browser_ui(controller, monkeypatch):
+    container = controller.manager.get_container.return_value
+    container.attrs["Config"]["Env"] = ["NIHIL_BROWSER_UI=1", "NIHIL_BROWSER_UI_PORT=6979"]
+    ready = []
+    monkeypatch.setattr("nihil.cli.controller.browser_ui_is_page_ready", lambda port: ready.append(port) or True)
+    assert controller._cmd_restart(SimpleNamespace(names=["box"], no_shell=True)) == 0
+    assert ready == [6979]
 
 
 def test_multiple_restarts_do_not_open_a_shell(controller):

@@ -20,6 +20,59 @@ class _ContainerOptionAction(argparse.Action):
             namespace.container = values
 
 
+class _ExplicitValueAction(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        setattr(namespace, self.dest, values)
+        setattr(namespace, f"{self.dest}_explicit", True)
+
+
+def _add_start_options(parser: argparse.ArgumentParser) -> None:
+    privilege = parser.add_mutually_exclusive_group()
+    privilege.add_argument("--privileged", dest="privileged", action="store_true", default=None, help="Privileged mode")
+    privilege.add_argument("--standard", dest="privileged", action="store_false", help="Disable privileged mode")
+    network = parser.add_mutually_exclusive_group()
+    network.add_argument("--network", default=None, metavar="NAME", help="Docker network name or mode: docker, host, disabled, or nat (default: from config)")
+    network.add_argument("--host", dest="network", action="store_const", const="host", help="Use the host network")
+    parser.add_argument("--image", default=None, metavar="VARIANT", help="Image variant to use (full|ad|web|blueteam or nihil/<variant>:local). If not specified, you will be prompted to select one.")
+    parser.add_argument("--workspace", "-w", default=None, help="Workspace path to mount")
+    parser.add_argument("--workspace-here", action="store_true", default=None, help="Mount the current working directory as /workspace inside the container.")
+    scripts = parser.add_mutually_exclusive_group()
+    scripts.add_argument("--script", action="store_true", help="Choose startup scripts interactively.")
+    scripts.add_argument("--startup-script", action="append", default=None, metavar="NAME", help="Run this startup script (repeatable; use for non-interactive selection).")
+    vpn = parser.add_mutually_exclusive_group()
+    vpn.add_argument("--vpn", nargs="?", const=True, metavar="FILE", default=None, help="Start the container with OpenVPN. With FILE, use that .ovpn file; without FILE, use ~/.nihil/vpn/client.ovpn or the only .ovpn in ~/.nihil/vpn.")
+    vpn.add_argument("--no-vpn", dest="vpn", action="store_false", help="Disable VPN")
+    parser.add_argument("--env", "-e", action="append", metavar="KEY[=VALUE]", default=None, help="Set an environment variable in the container (repeatable). Without VALUE, forwards the value from the host environment.")
+    x11 = parser.add_mutually_exclusive_group()
+    x11.add_argument("--enable-x11", dest="disable_x11", action="store_false", default=None, help="Enable X11/XWayland forwarding.")
+    x11.add_argument("--disable-x11", dest="disable_x11", action="store_true", help="Disable X11/XWayland forwarding for this container.")
+    wayland = parser.add_mutually_exclusive_group()
+    wayland.add_argument("--enable-wayland", dest="disable_wayland", action="store_false", default=None, help="Enable Wayland forwarding.")
+    wayland.add_argument("--disable-wayland", dest="disable_wayland", action="store_true", help="Disable Wayland socket forwarding for this container.")
+    my_resources = parser.add_mutually_exclusive_group()
+    my_resources.add_argument("--my-resources", dest="no_my_resources", action="store_false", default=None, help="Mount '~/.nihil/my-resources'.")
+    my_resources.add_argument("--no-my-resources", dest="no_my_resources", action="store_true", help="Do not mount '~/.nihil/my-resources' into the container.")
+    nihil_resources = parser.add_mutually_exclusive_group()
+    nihil_resources.add_argument("--nihil-resources", dest="no_nihil_resources", action="store_false", default=None, help="Mount the shared nihil-resources catalog.")
+    nihil_resources.add_argument("--no-nihil-resources", dest="no_nihil_resources", action="store_true", help="Do not mount the shared 'nihil-resources' catalog into the container.")
+    browser_ui = parser.add_mutually_exclusive_group()
+    browser_ui.add_argument("--browser-ui", dest="browser_ui", action="store_true", default=None, help="Expose a browser-based UI (noVNC) for this session.")
+    browser_ui.add_argument("--no-browser-ui", dest="browser_ui", action="store_false", help="Disable the browser UI.")
+    parser.add_argument("--browser-ui-resolution", choices=("1280x720", "1920x1080", "2560x1440"), default="1280x720", metavar="SIZE", action=_ExplicitValueAction, help="Browser UI desktop resolution (default: 1280x720).")
+    parser.set_defaults(browser_ui_resolution_explicit=False)
+    parser.add_argument("--browser-ui-port", type=int, default=None, metavar="PORT", help="Port for the browser UI (default: random 6901-6999 if not set).")
+    parser.add_argument("--browser-ui-password", type=str, default=None, metavar="PASSWORD", help="Password for browser UI session (default: random, shown once when ready).")
+    logging = parser.add_mutually_exclusive_group()
+    logging.add_argument("--log", "-l", dest="log", action="store_true", default=None, help="Enable shell logging (asciinema)")
+    logging.add_argument("--no-log", dest="log", action="store_false", help="Disable shell logging")
+    tmux = parser.add_mutually_exclusive_group()
+    tmux.add_argument("--tmux", dest="tmux", action="store_true", default=None, help="Open the container shell in tmux for this session.")
+    tmux.add_argument("--no-tmux", dest="tmux", action="store_false", help="Do not use tmux.")
+    shell = parser.add_mutually_exclusive_group()
+    shell.add_argument("--no-shell", dest="no_shell", action="store_true", default=None, help="Don't open shell after starting")
+    shell.add_argument("--shell", dest="no_shell", action="store_false", help="Open a shell after starting")
+
+
 def create_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="nihil",
@@ -93,12 +146,20 @@ Examples:
     customize_parser.add_argument(
         "--no-push", action="store_true", help="Prepare the branch locally without committing or pushing"
     )
-    customize_parser.add_argument(
+    customize_selection = customize_parser.add_mutually_exclusive_group()
+    customize_selection.add_argument(
         "--web", action="store_true", help="Select tools in a local browser instead of the terminal UI"
+    )
+    customize_selection.add_argument(
+        "--keep-tools", action="store_true", help="Reuse the saved tool selection without opening a selector"
     )
     customize_parser.add_argument(
         "--repo", default=None, metavar="REPO",
         help="GitHub repository (owner/repo or URL; default: TheNullPigeons/nihil-images)",
+    )
+    customize_parser.add_argument(
+        "--branch", default=None, metavar="BRANCH",
+        help="Upstream branch to customize and merge (default: repository default branch)",
     )
     customize_parser.add_argument(
         "--git-protocol", choices=["ssh", "https", "auto"], default="auto",
@@ -117,7 +178,8 @@ Examples:
     image_build = image_subparsers.add_parser("build", help="Trigger a GitHub Actions image build")
     image_build.add_argument("variant", choices=["all", "full", "ad", "web", "blueteam"], nargs="?", default="all", help="Image variant to build (default: all)")
     image_build.add_argument("--wait", action="store_true", help="Wait until the GitHub Actions build finishes")
-    image_build.add_argument("--web", action="store_true", help="Follow the GitHub Actions build in a local browser page")
+    image_build.add_argument("--web", action="store_true", help="Configure and follow the GitHub Actions build in a local browser page")
+    image_build.add_argument("--allow-tool-failures", action="store_true", help="Continue after non-core tool failures and keep a report in the image")
     subparsers.add_parser("version", help="Display Nihil version")
 
     doctor_parser = subparsers.add_parser("doctor", help="Run diagnostics checks (Docker, image, environment)")
@@ -132,60 +194,19 @@ Examples:
     start_parser = subparsers.add_parser("start", help="Start a container (creates it if it doesn't exist)")
     start_parser.add_argument("name", help="Container name")
     start_parser.add_argument("--verbose", "-v", action="store_true", help="Show detailed startup steps and container information")
-    start_privilege = start_parser.add_mutually_exclusive_group()
-    start_privilege.add_argument("--privileged", dest="privileged", action="store_true", default=None, help="Privileged mode")
-    start_privilege.add_argument("--standard", dest="privileged", action="store_false", help="Disable privileged mode")
-    start_parser.add_argument("--network", choices=["docker", "host", "disabled", "nat"], default=None, help="Network mode (default: from config, fallback: host)")
-    start_parser.add_argument("--image", default=None, metavar="VARIANT", help="Image variant to use (full|ad|web|blueteam or nihil/<variant>:local). If not specified, you will be prompted to select one.")
-    start_parser.add_argument("--workspace", "-w", help="Workspace path to mount")
-    start_parser.add_argument("--workspace-here", action="store_true", help="Mount the current working directory as /workspace inside the container.")
-    start_vpn = start_parser.add_mutually_exclusive_group()
-    start_vpn.add_argument(
-        "--vpn",
-        nargs="?",
-        const=True,
-        metavar="FILE",
-        default=None,
-        help="Start the container with OpenVPN. With FILE, use that .ovpn file; without FILE, use ~/.nihil/vpn/client.ovpn or the only .ovpn in ~/.nihil/vpn.",
-    )
-    start_vpn.add_argument("--no-vpn", dest="vpn", action="store_false", help="Disable VPN")
+    _add_start_options(start_parser)
+    start_parser.add_argument("--vpn-user", metavar="USER", default=None, help="VPN username, for configs that use auth-user-pass. Prompts for the password unless --vpn-pass is given.")
+    start_parser.add_argument("--vpn-pass", metavar="PASSWORD", default=None, help="VPN password (visible in shell history and ps; prefer the prompt).")
     start_parser.add_argument(
-        "--env",
-        "-e",
-        action="append",
-        metavar="KEY[=VALUE]",
-        default=None,
-        help="Set an environment variable in the container (repeatable). Without VALUE, forwards the value from the host environment.",
+        "--preset", nargs="?", const="", default=None, metavar="NAME",
+        help="Use a saved config preset for this new container; omit NAME to choose interactively.",
     )
-    start_x11 = start_parser.add_mutually_exclusive_group()
-    start_x11.add_argument("--enable-x11", dest="disable_x11", action="store_false", default=None, help="Enable X11/XWayland forwarding.")
-    start_x11.add_argument("--disable-x11", dest="disable_x11", action="store_true", help="Disable X11/XWayland forwarding for this container.")
-    start_wayland = start_parser.add_mutually_exclusive_group()
-    start_wayland.add_argument("--enable-wayland", dest="disable_wayland", action="store_false", default=None, help="Enable Wayland forwarding.")
-    start_wayland.add_argument("--disable-wayland", dest="disable_wayland", action="store_true", help="Disable Wayland socket forwarding for this container.")
-    start_my_resources = start_parser.add_mutually_exclusive_group()
-    start_my_resources.add_argument("--my-resources", dest="no_my_resources", action="store_false", default=None, help="Mount '~/.nihil/my-resources'.")
-    start_my_resources.add_argument("--no-my-resources", dest="no_my_resources", action="store_true", help="Do not mount '~/.nihil/my-resources' into the container.")
-    start_nihil_resources = start_parser.add_mutually_exclusive_group()
-    start_nihil_resources.add_argument("--nihil-resources", dest="no_nihil_resources", action="store_false", default=None, help="Mount the shared nihil-resources catalog.")
-    start_nihil_resources.add_argument("--no-nihil-resources", dest="no_nihil_resources", action="store_true", help="Do not mount the shared 'nihil-resources' catalog into the container.")
-    start_browser_ui = start_parser.add_mutually_exclusive_group()
-    start_browser_ui.add_argument("--browser-ui", dest="browser_ui", action="store_true", default=None, help="Expose a browser-based UI (noVNC) for this session.")
-    start_browser_ui.add_argument("--no-browser-ui", dest="browser_ui", action="store_false", help="Disable the browser UI.")
-    start_parser.add_argument("--browser-ui-port", type=int, default=None, metavar="PORT", help="Port for the browser UI (default: random 6901-6999 if not set).")
-    start_parser.add_argument("--browser-ui-password", type=str, default=None, metavar="PASSWORD", help="Password for browser UI session (default: random, shown once when ready).")
-    start_log = start_parser.add_mutually_exclusive_group()
-    start_log.add_argument("--log", "-l", dest="log", action="store_true", default=None, help="Enable shell logging (asciinema)")
-    start_log.add_argument("--no-log", dest="log", action="store_false", help="Disable shell logging")
-    start_tmux = start_parser.add_mutually_exclusive_group()
-    start_tmux.add_argument("--tmux", dest="tmux", action="store_true", default=None, help="Open the container shell in tmux for this session.")
-    start_tmux.add_argument("--no-tmux", dest="tmux", action="store_false", help="Do not use tmux.")
-    start_parser.add_argument("--no-shell", action="store_true", help="Don't open shell after starting")
     stop_parser = subparsers.add_parser("stop", help="Stop one or more containers")
     stop_parser.add_argument("names", nargs="+", help="Container name(s)")
 
     restart_parser = subparsers.add_parser("restart", help="Restart one or more containers (stop + start)")
     restart_parser.add_argument("names", nargs="+", help="Container name(s)")
+    restart_parser.add_argument("--browser-ui-resolution", choices=("1280x720", "1920x1080", "2560x1440"), default=None, metavar="SIZE", help="Recreate Browser UI at this desktop resolution.")
     restart_parser.add_argument("--no-shell", action="store_true", help="Don't open shell after restarting")
 
     remove_parser = subparsers.add_parser("remove", help="Remove one or more containers")
@@ -230,6 +251,20 @@ Examples:
 
     config_parser = subparsers.add_parser("config", help="Show or edit the Nihil configuration file")
     config_parser.add_argument("--edit", "-e", action="store_true", help="Open the config file in $EDITOR")
+    config_subparsers = config_parser.add_subparsers(dest="config_action", metavar="ACTION")
+    preset_parser = config_subparsers.add_parser("preset", help="Create and manage config presets")
+    preset_subparsers = preset_parser.add_subparsers(dest="preset_action", required=True, metavar="ACTION")
+    preset_create = preset_subparsers.add_parser("create", help="Create a preset without changing config.yml")
+    preset_create.add_argument("name", help="Preset name")
+    _add_start_options(preset_create)
+    preset_save = preset_subparsers.add_parser("save", help="Save the current config as a named preset")
+    preset_save.add_argument("name", help="Preset name")
+    preset_save.add_argument("--force", action="store_true", help="Replace an existing preset")
+    preset_subparsers.add_parser("list", help="List saved config presets")
+    preset_edit = preset_subparsers.add_parser("edit", help="Edit a saved config preset")
+    preset_edit.add_argument("name", help="Preset name")
+    preset_delete = preset_subparsers.add_parser("delete", help="Delete a saved config preset")
+    preset_delete.add_argument("name", help="Preset name")
 
     build_parser = subparsers.add_parser(
         "build", help="Build a nihil image locally, optionally showing progress in a browser",
@@ -241,7 +276,8 @@ Examples:
     build_parser.add_argument("--ref", metavar="REF", default=None, help="Remote branch or tag (default: active source branch/channel)")
     build_parser.add_argument("--no-cache", action="store_true", help="Pass --no-cache to docker build")
     build_parser.add_argument("--verbose", "-v", action="store_true", help="Show complete Docker build output (default: major steps only)")
-    build_parser.add_argument("--web", action="store_true", help="Show local Docker build progress in a browser")
+    build_parser.add_argument("--web", action="store_true", help="Configure the local Docker build and follow progress in a browser")
+    build_parser.add_argument("--allow-tool-failures", action="store_true", help="Continue after non-core tool failures and keep a report in the image")
     build_parser.add_argument("--tag", "-t", metavar="TAG", default=None, help="Custom image tag (default: nihil/<variant>:local)")
     build_parser.add_argument("--log", "-l", metavar="FILE", default=None, help="Write build output to a log file (use 'tail -f FILE' to follow)")
 

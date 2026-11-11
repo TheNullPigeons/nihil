@@ -33,6 +33,9 @@ from nihil.exceptions import (
 )
 
 
+VPN_AUTH_PATH = "/tmp/nihil_vpn_auth"
+
+
 class NihilManager:
     DEFAULT_IMAGE = DEFAULT_IMAGE
     AVAILABLE_IMAGES = AVAILABLE_IMAGES
@@ -326,6 +329,7 @@ class NihilManager:
         disable_nihil_resources: bool = False,
         nihil_resources_path: Optional[Path] = None,
         browser_ui: bool = False,
+        browser_ui_resolution: Optional[str] = None,
         browser_ui_port: Optional[int] = None,
         browser_ui_password: Optional[str] = None,
         environment: Optional[Dict[str, str]] = None,
@@ -481,7 +485,9 @@ class NihilManager:
                     kv.split("=", 1) for kv in container_config["environment"] if "=" in kv
                 )
             container_config["environment"]["NIHIL_BROWSER_UI"] = "1"
+            container_config["environment"]["NIHIL_BROWSER_UI_RESOLUTION"] = browser_ui_resolution or "1280x720"
             container_config["environment"]["NIHIL_BROWSER_UI_PORT"] = str(browser_ui_port)
+            container_config["environment"]["NIHIL_BROWSER_UI_VNC_PORT"] = str(browser_ui_port - 1000)
             # In "host" network mode the container shares the host's network namespace
             # directly, so whatever address the in-container noVNC proxy binds to is the
             # address it binds to *on the host* too: restrict it to loopback there. In
@@ -738,18 +744,29 @@ class NihilManager:
         except Exception:
             return False
 
-    def start_vpn(self, container, config_path: str = "/opt/nihil/vpn/client.ovpn") -> bool:
-        """Start OpenVPN inside the container and wait for the tunnel."""
+    def start_vpn(self, container, config_path: str = "/opt/nihil/vpn/client.ovpn",
+                  auth: Optional[Tuple[str, str]] = None) -> bool:
+        """Start OpenVPN inside the container and wait for the tunnel.
+
+        auth is a (user, password) pair passed to OpenVPN with --auth-user-pass.
+        """
         env = container.attrs.get("Config", {}).get("Env") or []
         # Legacy entrypoints still own startup, even when their setup is slow.
         if "NIHIL_VPN=1" in env and config_path == "/opt/nihil/vpn/client.ovpn":
             return self.wait_for_vpn(container)
         container.exec_run(["mkdir", "-p", "/var/log/nihil"])
-        container.exec_run(
-            ["openvpn", "--log-append", "/var/log/nihil/vpn.log",
-             "--config", config_path],
-            detach=True,
-        )
+        command = ["openvpn", "--log-append", "/var/log/nihil/vpn.log", "--config", config_path]
+        if auth:
+            user, password = auth
+            data = f"{user}\n{password}\n".encode()
+            info = tarfile.TarInfo(VPN_AUTH_PATH.rsplit("/", 1)[1])
+            info.size, info.mode = len(data), 0o600
+            buf = io.BytesIO()
+            with tarfile.open(fileobj=buf, mode="w") as tar:
+                tar.addfile(info, io.BytesIO(data))
+            container.put_archive("/tmp", buf.getvalue())
+            command += ["--auth-user-pass", VPN_AUTH_PATH]
+        container.exec_run(command, detach=True)
         return self.wait_for_vpn(container)
 
     def _running_vpn_config(self, container) -> Optional[str]:
@@ -831,6 +848,24 @@ class NihilManager:
             exit_code, output = container.exec_run(
                 ["bash", script], stdout=True, stderr=True
             )
+            decoded = output.decode("utf-8", errors="replace").strip() if output else ""
+            if exit_code != 0:
+                raise RuntimeError(decoded or f"script exited with code {exit_code}")
+            return decoded
+        except RuntimeError:
+            raise
+        except Exception as e:
+            raise RuntimeError(str(e)) from e
+
+    def run_startup_script(self, container, script: Path) -> Optional[str]:
+        """Copy and run a selected startup script from the host."""
+        try:
+            archive = io.BytesIO()
+            with tarfile.open(fileobj=archive, mode="w") as tar:
+                tar.add(script, arcname=script.name)
+            container.put_archive("/tmp", archive.getvalue())
+            target = f"/tmp/{script.name}"
+            exit_code, output = container.exec_run(["bash", target], stdout=True, stderr=True)
             decoded = output.decode("utf-8", errors="replace").strip() if output else ""
             if exit_code != 0:
                 raise RuntimeError(decoded or f"script exited with code {exit_code}")

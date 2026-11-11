@@ -4,13 +4,14 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import shutil
 import json
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 
 UPSTREAM_REPO = "TheNullPigeons/nihil-images"
@@ -153,6 +154,31 @@ class ImageSourceManager:
         ssh_dir = Path.home() / ".ssh"
         return ssh_dir.is_dir() and any(ssh_dir.glob("id_*"))
 
+    def github_about(self, repos: list[str]) -> dict[str, str]:
+        """Fetch GitHub About descriptions together, keeping any partial response."""
+        repos = list(dict.fromkeys(repo for repo in repos if re.fullmatch(r"[\w.-]+/[\w.-]+", repo, re.ASCII)))
+        if not repos:
+            return {}
+        fields = []
+        for index, repo in enumerate(repos):
+            owner, name = repo.split("/")
+            fields.append(f'r{index}: repository(owner: "{owner}", name: "{name}") {{ description }}')
+        try:
+            result = subprocess.run(
+                ["gh", "api", "graphql", "-f", "query={" + " ".join(fields) + "}"],
+                capture_output=True, text=True, timeout=8, env=self._noninteractive_env(),
+                stdin=subprocess.DEVNULL,
+            )
+            data = json.loads(result.stdout).get("data") or {}
+        except (OSError, subprocess.TimeoutExpired, ValueError):
+            return {}
+        descriptions = {}
+        for index, repo in enumerate(repos):
+            description = (data.get(f"r{index}") or {}).get("description")
+            if description:
+                descriptions[repo] = description
+        return descriptions
+
     def _default_branch(self, repo: str) -> str:
         return self._run([
             "gh", "repo", "view", repo,
@@ -203,6 +229,7 @@ class ImageSourceManager:
         self,
         *,
         variant: str,
+        base_branch: str | None = None,
         git_protocol: str | None = None,
         delete_existing: bool | str = False,
     ) -> tuple[Path, str, str]:
@@ -211,6 +238,12 @@ class ImageSourceManager:
             git_protocol = self._default_git_protocol()
         if git_protocol not in {"ssh", "https"}:
             raise ImageSourceError("Git protocol must be 'ssh', 'https' or 'auto'.")
+        if base_branch is not None:
+            try:
+                self._run(["git", "check-ref-format", f"refs/heads/{base_branch}"])
+                self._run(["gh", "api", f"repos/{self.upstream_repo}/git/ref/heads/{quote(base_branch, safe='/')}"])
+            except ImageSourceError as exc:
+                raise ImageSourceError(f"Cannot use upstream branch '{base_branch}': {exc}") from exc
         login = self._gh_user()
         repo_name = self.upstream_repo.rsplit("/", 1)[1]
         fork_repo = f"{login}/{repo_name}"
@@ -256,7 +289,7 @@ class ImageSourceManager:
         self._ensure_git_remote(path, "upstream", upstream_url)
         self._run(["git", "fetch", "upstream"], cwd=path)
 
-        default_branch = self._default_branch(self.upstream_repo)
+        default_branch = base_branch if base_branch is not None else self._default_branch(self.upstream_repo)
         self._run(["git", "fetch", "origin"], cwd=path)
         branches = self._run(["git", "branch", "--format=%(refname:short)"], cwd=path).splitlines()
         remote_branches = self._run(
@@ -305,7 +338,7 @@ class ImageSourceManager:
         )
 
     def trigger_build(
-        self, *, variant: str = "all", wait: bool = False,
+        self, *, variant: str = "all", wait: bool = False, allow_tool_failures: bool = False,
         progress_callback=None, cancel_event=None,
     ) -> tuple[str, str]:
         """Trigger the Docker workflow for the active source and return its repo/ref."""
@@ -325,11 +358,14 @@ class ImageSourceManager:
         if progress_callback:
             progress_callback(0, 0, "Dispatching GitHub Actions")
         dispatch_started = datetime.now(timezone.utc)
-        self._run([
+        command = [
             "gh", "workflow", "run", "docker-build.yml",
             "--repo", repo, "--ref", branch,
             "-f", f"variant={variant}",
-        ])
+        ]
+        if allow_tool_failures:
+            command.extend(["-f", "allow_tool_failures=true"])
+        self._run(command)
         if wait:
             run_id = ""
             deadline = time.monotonic() + 30

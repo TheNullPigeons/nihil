@@ -44,7 +44,7 @@ h1 {{ margin:0 0 10px; font:800 clamp(36px,6vw,58px)/1 'Big Shoulders','Arial Na
 
 def _render_page(
     tools: list[dict], disabled: set[str], title: str, token: str,
-    action_label: str = "Apply selection",
+    action_label: str = "Apply selection", allow_tool_failures: bool | None = None,
 ) -> bytes:
     categories: dict[str, list[dict]] = {}
     for tool in tools:
@@ -67,16 +67,18 @@ def _render_page(
         for tool in entries:
             name = html.escape(tool["name"], quote=True)
             command = html.escape(str(tool.get("cmd") or "-"))
+            description = html.escape(str(tool.get("description") or ""), quote=True)
+            about = f'<span class="tool-about">{description}</span>' if description else ""
             mandatory = tool["mandatory"]
             checked = " checked" if mandatory or tool["name"] not in disabled else ""
             locked = " disabled" if mandatory else ""
             badge = '<span class="required">required</span>' if mandatory else ""
             rows.append(
-                f'<label class="tool" data-search="{name.lower()} {command.lower()} {category_search}" '
+                f'<label class="tool" data-search="{name.lower()} {command.lower()} {category_search} {description.lower()}" '
                 f'data-category="{category_value}">'
                 f'<input type="checkbox" name="enabled" value="{name}"{checked}{locked}>'
                 f'<span class="checkmark"></span><span class="tool-copy"><b>{name}</b>'
-                f'<code>$ {command}</code></span>{badge}</label>'
+                f'<code>$ {command}</code>{about}</span>{badge}</label>'
             )
         groups.append(
             f'<section class="group" data-group><div class="group-head"><label class="category-toggle">'
@@ -87,9 +89,20 @@ def _render_page(
 
     action = "/save?" + urlencode({"token": token})
     cancel = "/cancel?" + urlencode({"token": token})
+    build_controls = ""
+    if allow_tool_failures is not None:
+        checked = " checked" if allow_tool_failures else ""
+        build_controls = (
+            '<fieldset class="build-options"><legend>Build options</legend>'
+            '<label><input type="checkbox" name="allow_tool_failures" value="1"'
+            f'{checked} aria-describedby="tool-failure-help"><strong>Allow tool failures</strong></label>'
+            '<p id="tool-failure-help">Continue if a non-core tool fails. Base setup and core tools '
+            'must succeed. The image includes a failure report.</p></fieldset>'
+        )
+    heading = "Choose your tools." if tools else "Configure your build."
     document = f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
-<title>Nihil tool selector</title><style>
+<title>{"Nihil tool selector" if tools else "Nihil build settings"}</title><style>
 @import url('https://fonts.googleapis.com/css2?family=Big+Shoulders:wght@500..900&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
 :root {{ color-scheme:dark; font-family:'IBM Plex Sans',system-ui,sans-serif; background:#141416; color:#f3eee5; accent-color:#32b4e3 }}
 * {{ box-sizing:border-box }} body {{ margin:0; min-height:100vh; background-color:#141416; background-image:linear-gradient(#232226 1px,transparent 1px),linear-gradient(90deg,#232226 1px,transparent 1px); background-size:32px 32px }}
@@ -119,18 +132,34 @@ button:hover,.cancel:hover {{ border-color:#32b4e3; color:#32b4e3 }}
 .tool:hover {{ border-color:#686568; background:#232226 }} .tool:has(input:checked) {{ border-color:#32b4e388; background:linear-gradient(135deg,#32b4e318,#19191c 72%) }}
 .tool input {{ position:absolute; opacity:0; pointer-events:none }} .checkmark {{ flex:none; width:20px; height:20px; border:1px solid #686568 }}
 .tool input:checked + .checkmark {{ border-color:#32b4e3; background:#32b4e3 }} .tool input:checked + .checkmark:after {{ content:'✓'; display:block; color:#141416; text-align:center; font-weight:900; line-height:18px }}
+.tool-about {{ color:#b3acaa; font-size:12px; overflow-wrap:anywhere }}
 .tool-copy {{ min-width:0; display:flex; flex:1; flex-direction:column; gap:4px }} .tool-copy b {{ overflow:hidden; color:#f3eee5; text-overflow:ellipsis; font-size:14px }} code {{ overflow:hidden; color:#918d8c; font:10px 'IBM Plex Mono',monospace; text-overflow:ellipsis }}
 .required {{ align-self:flex-start; color:#b45309; font:9px 'IBM Plex Mono',monospace; letter-spacing:.08em; text-transform:uppercase }} .tool:has(input:disabled) {{ cursor:default }}
 .actions {{ position:fixed; z-index:3; right:0; bottom:0; left:0; border-top:1px solid #333136; background:#141416ed; backdrop-filter:blur(16px) }} .actions-inner {{ display:flex; align-items:center; justify-content:space-between; width:min(1760px,calc(100% - 64px)); margin:auto; padding:14px 0 }}
 .selection {{ color:#aaa6a3; font-size:13px }} .selection strong {{ color:#32b4e3 }} .action-buttons {{ display:flex; gap:8px }} button.primary {{ border-color:#32b4e3; background:#32b4e3; color:#141416; font-weight:700; box-shadow:3px 3px 0 #b45309 }} button.primary:hover {{ background:#57c7ec; color:#141416 }}
+.build-options {{ min-width:0; margin:0 0 20px; padding:12px 20px 20px; border:1px solid #555157; background:#202024 }}
+.build-options legend {{ padding:0 8px; color:#75d6f7; font:600 14px 'IBM Plex Sans',sans-serif }}
+.build-options label {{ display:flex; align-items:center; gap:12px; min-height:44px; font-size:18px; cursor:pointer }}
+.build-options input {{ flex:none; width:22px; height:22px; margin:0; accent-color:#32b4e3 }}
+.build-options p {{ max-width:58ch; margin:4px 0 0 34px; color:#ded9d3; font-size:16px; line-height:1.5 }}
+.build-options input:focus-visible,.action-buttons :focus-visible {{ outline:2px solid #75d6f7; outline-offset:4px }}
+.build-only {{ background-image:none }}
+.build-only .page {{ width:min(44rem,calc(100% - 32px)); padding:clamp(20px,5vh,44px) 0 32px }}
+.build-only h1 {{ font-size:clamp(32px,5vw,48px); line-height:1.05; text-transform:none }}
+.build-only .subtitle {{ color:#ded9d3; font-size:16px }}
+.build-only .hero {{ margin-bottom:20px }}
+.build-only .actions {{ position:static; border:0; background:none; backdrop-filter:none }}
+.build-only .actions-inner {{ width:100%; justify-content:flex-end; padding:0 }}
+.build-only .action-buttons > * {{ display:inline-flex; align-items:center; min-height:44px }}
+.build-only .filters,.build-only .stats,.build-only .selection,.build-only .empty {{ display:none }}
 .hidden {{ display:none }} .empty {{ display:none; padding:70px 20px; color:#918d8c; text-align:center; font-family:'IBM Plex Mono',monospace }} .empty.visible {{ display:block }}
 @media(max-width:850px) {{ .hero {{ align-items:start; flex-direction:column }} .filters {{ grid-template-columns:1fr 1fr }} .filters input {{ grid-column:1/-1 }} .tool-grid {{ grid-template-columns:repeat(2,minmax(0,1fr)) }} }}
 @media(max-width:540px) {{ .page {{ width:min(100% - 20px,1180px); padding-top:24px }} .filters,.tool-grid {{ grid-template-columns:1fr }} .filters select,.toggle-buttons {{ grid-column:1 }} .toggle-buttons button {{ flex:1 }} .stats {{ width:100% }} .stat {{ flex:1 }} .selection {{ display:none }} }}
-</style></head><body>
+</style></head><body class="{'' if tools else 'build-only'}">
 <div class="airmail-bar"></div><header class="site-head"><div class="site-head-inner"><div class="brand"><span class="brand-mark">N</span><span class="brand-copy"><strong>TheNullPigeons</strong><small>Nihil image customizer</small></span></div><span class="local-badge">Local session</span></div></header>
-<main class="page"><div class="hero"><div><h1>Choose your tools.</h1><div class="subtitle">Customize <strong>{html.escape(title)}</strong> without the bloat.</div></div>
+<main class="page"><div class="hero"><div><h1>{heading}</h1><div class="subtitle">{"Customize" if tools else "Prepare"} <strong>{html.escape(title)}</strong>.</div></div>
 <div class="stats"><div class="stat"><b>{len(tools)}</b><small>available</small></div><div class="stat"><b id="stat-selected">{selected_count}</b><small>selected</small></div><div class="stat"><b>{required_count}</b><small>required</small></div></div></div>
-<form method="post" action="{action}"><div class="filters">
+<form method="post" action="{action}">{build_controls}<div class="filters">
 <input id="search" type="search" placeholder="Search tools or commands…" aria-label="Search tools" autofocus>
 <select id="category" aria-label="Filter by category"><option value="">All categories</option>{category_options}</select>
 <select id="status" aria-label="Filter by status"><option value="">Any status</option><option value="selected">Selected</option><option value="disabled">Disabled</option><option value="required">Required</option></select>
@@ -209,7 +238,7 @@ def select_tools_web(
     start_immediately: bool = False, page_context: str = "Nihil · GitHub Actions",
     page_title: str = "Building your image…", success_title: str = "Customization complete",
     initial_label: str = "Preparing customization",
-    plain_logs: bool = False,
+    plain_logs: bool = False, allow_tool_failures: bool | None = None,
 ) -> set[str] | None:
     """Open a one-session localhost selector or progress page and wait for completion."""
     token = secrets.token_urlsafe(24)
@@ -223,6 +252,7 @@ def select_tools_web(
         "logs": "",
         "reported": False,
         "log_version": 0,
+        "allow_tool_failures": allow_tool_failures,
     }
     cancel_event = threading.Event()
 
@@ -236,7 +266,10 @@ def select_tools_web(
 
     def apply(selection: set[str]) -> None:
         try:
-            on_save(selection, report, cancel_event)
+            if allow_tool_failures is None:
+                on_save(selection, report, cancel_event)
+            else:
+                on_save(selection, report, cancel_event, allow_tool_failures=state["allow_tool_failures"])
             state["result"] = selection
             state["success"] = True
             current = state["progress"]
@@ -283,7 +316,9 @@ def select_tools_web(
                         initial_label=initial_label,
                         plain_logs=plain_logs,
                     )
-                    if start_immediately else _render_page(tools, disabled, title, token, action_label)
+                    if start_immediately or state.get("worker_started") else _render_page(
+                        tools, disabled, title, token, action_label, allow_tool_failures,
+                    )
                 )
                 self._reply(200, page)
             elif path == "/status":
@@ -336,15 +371,24 @@ def select_tools_web(
                 return
             form = parse_qs(self.rfile.read(length).decode("utf-8", errors="replace"))
             selection = _disabled_from_enabled(tools, set(form.get("enabled", [])))
+            if allow_tool_failures is not None:
+                values = form.get("allow_tool_failures", [])
+                if values not in ([], ["1"]):
+                    self._reply(400, b"Invalid tool failure setting", "text/plain")
+                    return
             if on_save is None:
                 state["result"] = selection
                 self._reply(200, _render_result("Selection saved", "Your tool selection was sent to Nihil. You may close this tab.", True))
             elif state["result"] is not _PENDING or state.get("worker_started"):
                 self._reply(409, b"Customization already started", "text/plain")
             else:
+                state["allow_tool_failures"] = form.get("allow_tool_failures") == ["1"]
                 state["worker_started"] = True
                 threading.Thread(target=apply, args=(selection,), daemon=True).start()
-                self._reply(202, _render_progress_page(token, can_cancel))
+                self._reply(202, _render_progress_page(
+                    token, can_cancel, page_context=page_context, page_title=page_title,
+                    success_title=success_title, initial_label=initial_label, plain_logs=plain_logs,
+                ))
 
         def log_message(self, format: str, *args) -> None:
             pass
@@ -352,7 +396,8 @@ def select_tools_web(
     server = HTTPServer(("127.0.0.1", 0), Handler)
     server.timeout = 0.5
     url = f"http://127.0.0.1:{server.server_port}/?{urlencode({'token': token})}"
-    print(f"Open {'build progress' if start_immediately else 'the tool selector'}: {url}")
+    page_name = "build progress" if start_immediately else "build settings" if not tools else "the tool selector"
+    print(f"Open {page_name}: {url}")
     try:
         webbrowser.open(url)
     except webbrowser.Error:

@@ -310,10 +310,12 @@ class TestNihilManager:
         with patch('nihil.manager.manager.docker.from_env', return_value=mock_docker_client):
             with patch('nihil.manager.manager.ensure_filesystem'):
                 manager = NihilManager()
-                manager.create_container("bui-host", network_mode="host", browser_ui=True, browser_ui_port=6901)
+                manager.create_container("bui-host", network_mode="host", browser_ui=True, browser_ui_resolution="1920x1080", browser_ui_port=6901)
 
         environment = mock_docker_client.containers.create.call_args.kwargs["environment"]
         assert environment["NIHIL_BROWSER_UI_BIND"] == "127.0.0.1"
+        assert environment["NIHIL_BROWSER_UI_RESOLUTION"] == "1920x1080"
+        assert environment["NIHIL_BROWSER_UI_VNC_PORT"] == "5901"
 
     def test_create_container_browser_ui_binds_all_interfaces_on_bridge_network(self, mock_docker_client):
         """In bridge mode, Docker's own port publishing (below) restricts the host side to
@@ -328,6 +330,7 @@ class TestNihilManager:
 
         call_args = mock_docker_client.containers.create.call_args
         assert call_args.kwargs["environment"]["NIHIL_BROWSER_UI_BIND"] == "0.0.0.0"
+        assert call_args.kwargs["environment"]["NIHIL_BROWSER_UI_VNC_PORT"] == "5901"
         assert call_args.kwargs["ports"]["6901/tcp"] == ("127.0.0.1", 6901)
 
     def test_create_container_with_vpn(self, mock_docker_client, tmp_path):

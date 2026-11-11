@@ -14,7 +14,7 @@ HISTORY_PATH = Path.home() / ".config" / "nihil" / "history.log"
 # (VPN file, workspace path, --env variables...). This file is never
 # purged automatically (not even by `nihil remove`), so their values
 # are never logged in clear text.
-_REDACT_FLAGS = {"--env", "-e", "--vpn", "--workspace", "-w", "--browser-ui-password"}
+_REDACT_FLAGS = {"--env", "-e", "--vpn", "--vpn-pass", "--workspace", "-w", "--browser-ui-password"}
 
 
 def _redact(argv: List[str]) -> List[str]:

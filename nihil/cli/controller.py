@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """Controller CLI Nihil: point d'entrée et dispatch des commandes."""
 
+import getpass
 import os
 import secrets
 import shlex
@@ -11,7 +12,7 @@ import time
 from contextlib import nullcontext
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from docker.errors import APIError
 from nihil.config import ensure_filesystem, NihilConfig, NIHIL_HOME
@@ -113,10 +114,10 @@ class NihilController:
             return ("Installed", self.formatter.YELLOW)
         return "Available"
 
-    def _start_shell_command(self, args) -> str:
+    def _start_shell_command(self, args, config=None) -> str:
         if getattr(args, "tmux", False):
             return "tmux new-session -A -s nihil"
-        shell = getattr(self.config, "default_shell", "zsh")
+        shell = getattr(config or self.config, "default_shell", "zsh")
         if shell == "tmux":
             return "tmux new-session -A -s nihil"
         if shell == "bash":
@@ -163,7 +164,22 @@ class NihilController:
     def _container_uses_host_network(self, container) -> bool:
         return (container.attrs.get("HostConfig") or {}).get("NetworkMode") == "host"
 
-    def _start_vpn_with_feedback(self, container, config_path: str = "/opt/nihil/vpn/client.ovpn") -> None:
+    def _vpn_auth(self, args) -> Optional[Tuple[str, str]]:
+        """(user, password) from --vpn-user/--vpn-pass, prompting for a missing password."""
+        user, password = getattr(args, "vpn_user", None), getattr(args, "vpn_pass", None)
+        if user is None:
+            if password is not None:
+                raise ValueError("--vpn-pass requires --vpn-user.")
+            return None
+        if password is None:
+            password = getpass.getpass(f"VPN password for {user}: ")
+        # OpenVPN reads the auth file as one line for the user, one for the password.
+        if "\n" in user or "\n" in password:
+            raise ValueError("VPN user and password cannot contain newlines.")
+        return user, password
+
+    def _start_vpn_with_feedback(self, container, config_path: str = "/opt/nihil/vpn/client.ovpn",
+                                 auth: Optional[Tuple[str, str]] = None) -> None:
         """Start OpenVPN inside the container and wait for the tunnel with a visual spinner."""
         conflicts = self.manager.find_vpn_conflicts(container, config_path)
         if conflicts:
@@ -174,7 +190,7 @@ class NihilController:
             ))
         try:
             with self._loading("Starting OpenVPN and waiting for tunnel (tun0)..."):
-                connected = self.manager.start_vpn(container, config_path=config_path)
+                connected = self.manager.start_vpn(container, config_path=config_path, auth=auth)
             if connected:
                 print(self.formatter.success("VPN tunnel established."))
             else:
@@ -333,7 +349,7 @@ class NihilController:
 
         def get_update(c):
             if _update_cache[0] is _NOT_CHECKED:
-                _update_cache[0] = self._check_image_update(c) if self.config.auto_check_updates else None
+                _update_cache[0] = self._check_image_update(c) if config.auto_check_updates else None
             return _update_cache[0]
 
         container_name = args.name
@@ -346,15 +362,76 @@ class NihilController:
         verbose_info(f"Looking for container '{container_name}'...")
         container = self.manager.get_container(container_name)
         container_existed = container is not None
+        config = self.config
+        preset_options = {}
+        preset_scripts = None
+        if getattr(args, "preset", None) is not None:
+            if container_existed:
+                print(self.formatter.error("--preset can only be used when creating a new container."), file=sys.stderr)
+                return 1
+            if not args.preset and not sys.stdin.isatty():
+                print(self.formatter.error("Pass a preset name when selecting without a terminal."), file=sys.stderr)
+                return 1
+            from nihil.features.config_presets import choose_preset, load_preset, load_preset_options, load_preset_scripts
+            preset_name = args.preset or choose_preset()
+            if not preset_name:
+                print(self.formatter.error("No config preset selected."), file=sys.stderr)
+                return 1
+            try:
+                config = load_preset(preset_name)
+                preset_options = load_preset_options(preset_name)
+                preset_scripts = load_preset_scripts(preset_name, preset_options)
+            except (FileNotFoundError, ValueError) as e:
+                print(self.formatter.error(str(e)), file=sys.stderr)
+                return 1
+            for field, value in preset_options.items():
+                if field == "scripts":
+                    continue
+                if field == "env":
+                    args.env = [*(value or []), *(args.env or [])]
+                elif field == "browser_ui_resolution" and args.browser_ui_resolution_explicit:
+                    continue
+                elif field in {"workspace", "workspace_here"}:
+                    if args.workspace is None and args.workspace_here is None:
+                        setattr(args, field, value)
+                elif getattr(args, field, None) is None:
+                    setattr(args, field, value)
+            verbose_info(f"Using config preset '{preset_name}'.")
+        startup_scripts = None
+        if getattr(args, "script", False):
+            if not sys.stdin.isatty():
+                print(self.formatter.error("Use --startup-script NAME when selecting scripts without a terminal."), file=sys.stderr)
+                return 1
+            from nihil.features.startup_scripts import select_startup_scripts
+            startup_scripts = select_startup_scripts()
+            if startup_scripts is None:
+                print(self.formatter.info("Startup script selection cancelled."))
+                return 1
+        elif getattr(args, "startup_script", None):
+            from nihil.features.startup_scripts import resolve_startup_scripts
+            try:
+                startup_scripts = resolve_startup_scripts(args.startup_script)
+            except ValueError as e:
+                print(self.formatter.error(str(e)), file=sys.stderr)
+                return 1
+        elif preset_scripts is not None:
+            startup_scripts = preset_scripts
         explicit_network = args.network is not None
-        for field in ("privileged", "browser_ui", "tmux"):
+        if args.privileged is None:
+            args.privileged = getattr(config, "default_privileged", False)
+        for field in ("browser_ui", "tmux", "no_shell"):
             if getattr(args, field, None) is None:
                 setattr(args, field, False)
 
         # Appliquer les defaults de config pour les options non spécifiées par l'utilisateur
         if args.network is None:
-            args.network = self.config.default_network
+            args.network = config.default_network
         if not self._apply_vpn_network_policy(args, explicit_network):
+            return 1
+        try:
+            vpn_auth = self._vpn_auth(args)
+        except ValueError as e:
+            print(self.formatter.error(str(e)), file=sys.stderr)
             return 1
         from nihil.utils.platform_info import get_host_os, get_docker_engine, host_network_supported, HostOS
         _host_os = get_host_os()
@@ -364,8 +441,8 @@ class NihilController:
                 "Host networking is not supported on this platform. Switching to 'docker' network mode."
             ))
             args.network = "docker"
-        enable_x11 = self.config.x11_by_default if args.disable_x11 is None else not args.disable_x11
-        enable_wayland = self.config.wayland_by_default if args.disable_wayland is None else not args.disable_wayland
+        enable_x11 = config.x11_by_default if args.disable_x11 is None else not args.disable_x11
+        enable_wayland = config.wayland_by_default if args.disable_wayland is None else not args.disable_wayland
         args.enable_x11 = enable_x11
         args.enable_wayland = enable_wayland
         if _host_os == HostOS.MACOS and enable_x11:
@@ -373,11 +450,11 @@ class NihilController:
                 "macOS detected: using XQuartz for X11. Make sure XQuartz is running and run 'xhost +localhost' on your host."
             ))
         if args.no_my_resources is None:
-            args.no_my_resources = not self.config.my_resources_enabled
+            args.no_my_resources = not config.my_resources_enabled
         if args.no_nihil_resources is None:
-            args.no_nihil_resources = not self.config.nihil_resources_enabled
+            args.no_nihil_resources = not config.nihil_resources_enabled
         if not getattr(args, "no_nihil_resources", False):
-            nr_path = self.config.nihil_resources_path
+            nr_path = config.nihil_resources_path
             if not nr_path.exists():
                 if self._prompt_install_nihil_resources(nr_path):
                     rc = self._clone_nihil_resources(nr_path)
@@ -386,12 +463,12 @@ class NihilController:
                         args.no_nihil_resources = True
                 else:
                     args.no_nihil_resources = True
-            elif self.config.nihil_resources_auto_update:
+            elif config.nihil_resources_auto_update:
                 self._nihil_resources_pull(nr_path, quiet=True)
         if args.log is None:
-            args.log = self.config.logging_always_enable
-        if args.workspace is None and not args.workspace_here and self.config.default_workspace:
-            args.workspace = str(self.config.default_workspace)
+            args.log = config.logging_always_enable
+        if args.workspace is None and not args.workspace_here and config.default_workspace:
+            args.workspace = str(config.default_workspace)
         if container:
             verbose_info(f"Container '{container_name}' found.")
             if getattr(args, "env", None):
@@ -419,7 +496,7 @@ class NihilController:
             )
             session_vpn_requested = bool(getattr(args, "vpn", None))
             if container_has_vpn_config and not session_vpn_requested and not self.manager.wait_for_vpn(container, timeout=2):
-                self._start_vpn_with_feedback(container)
+                self._start_vpn_with_feedback(container, auth=vpn_auth)
             delay_info = not args.no_shell and any(e == "NIHIL_BROWSER_UI=1" for e in env_list)
             if verbose and not delay_info:
                 self._print_container_info(container, args, created=False, update_available=get_update(container))
@@ -484,8 +561,8 @@ class NihilController:
             
             # Utiliser le default de la config, ou créer un propre au container par défaut
             if workspace_path is None:
-                if getattr(self.config, "default_workspace", None):
-                    workspace_path = str(self.config.default_workspace)
+                if getattr(config, "default_workspace", None):
+                    workspace_path = str(config.default_workspace)
                 else:
                     from nihil.config.defaults import NIHIL_HOME
                     default_ws = NIHIL_HOME / "workspaces" / container_name
@@ -495,6 +572,7 @@ class NihilController:
             if workspace_path is not None:
                 workspace_path = str(Path(workspace_path).expanduser().resolve())
             browser_ui_enabled = getattr(args, "browser_ui", False)
+            browser_ui_resolution = getattr(args, "browser_ui_resolution", None) or "1280x720"
             enable_x11, enable_wayland, display_messages = self._resolve_display_forwarding(
                 enable_x11, enable_wayland, browser_ui_enabled
             )
@@ -514,24 +592,25 @@ class NihilController:
             if environment is None:
                 return 1
             environment.update({
-                "NIHIL_HISTORY_SYNC_CREDENTIALS": str(int(self.config.nihil_history_sync_credentials)),
-                "NIHIL_HISTORY_SYNC_HOSTS": str(int(self.config.nihil_history_sync_hosts)),
+                "NIHIL_HISTORY_SYNC_CREDENTIALS": str(int(config.nihil_history_sync_credentials)),
+                "NIHIL_HISTORY_SYNC_HOSTS": str(int(config.nihil_history_sync_hosts)),
             })
             container = self.manager.create_container(
                 name=container_name,
                 image=image,
                 privileged=args.privileged,
-                network_mode=network_map.get(args.network, "host"),
+                network_mode=network_map.get(args.network, args.network),
                 workspace=workspace_path,
                 vpn=bool(vpn_path),
                 vpn_config_path=vpn_path,
                 enable_x11=enable_x11,
                 enable_wayland=enable_wayland,
                 disable_my_resources=getattr(args, "no_my_resources", False),
-                my_resources_path=self.config.my_resources_path,
+                my_resources_path=config.my_resources_path,
                 disable_nihil_resources=getattr(args, "no_nihil_resources", False),
-                nihil_resources_path=self.config.nihil_resources_path,
+                nihil_resources_path=config.nihil_resources_path,
                 browser_ui=browser_ui_enabled,
+                browser_ui_resolution=browser_ui_resolution if browser_ui_enabled else None,
                 browser_ui_port=browser_ui_port if browser_ui_enabled else None,
                 browser_ui_password=browser_ui_password if browser_ui_enabled else None,
                 environment=environment,
@@ -541,7 +620,7 @@ class NihilController:
             self.manager.start_container(container)
             if verbose:
                 print(self.formatter.success(f"Container '{container_name}' created and started successfully."))
-            if not getattr(args, "no_my_resources", False):
+            if not getattr(args, "no_my_resources", False) and startup_scripts is None:
                 try:
                     output = self.manager.run_user_setup_script(container)
                     if verbose and output is not None:
@@ -552,10 +631,18 @@ class NihilController:
                 except RuntimeError as e:
                     print(self.formatter.warning(f"User setup script failed: {e}"))
             if bool(vpn_path):
-                self._start_vpn_with_feedback(container)
+                self._start_vpn_with_feedback(container, auth=vpn_auth)
             if verbose and not (browser_ui_enabled and not args.no_shell):
                 self._print_container_info(container, args, created=True, update_available=get_update(container))
-        command = self._start_shell_command(args)
+        for startup_script in startup_scripts or []:
+            try:
+                output = self.manager.run_startup_script(container, startup_script)
+                if output:
+                    print(output)
+                print(self.formatter.success(f"Startup script '{startup_script.name}' completed."))
+            except RuntimeError as e:
+                print(self.formatter.warning(f"Startup script failed: {e}"))
+        command = self._start_shell_command(args, config=config)
         try:
             vpn_path = self._resolve_vpn_config_path(getattr(args, "vpn", None))
         except (FileNotFoundError, ValueError) as e:
@@ -579,7 +666,7 @@ class NihilController:
                             return 1
                     if self.manager.copy_file_into_container(container, str(vpn_file), "/tmp/nihil_vpn.ovpn"):
                         container.exec_run(["killall", "openvpn"])
-                        self._start_vpn_with_feedback(container, config_path="/tmp/nihil_vpn.ovpn")
+                        self._start_vpn_with_feedback(container, config_path="/tmp/nihil_vpn.ovpn", auth=vpn_auth)
                         command = f"sh -c {shlex.quote(command + '; killall openvpn >/dev/null 2>&1')}"
                     else:
                         print(self.formatter.warning("Could not copy VPN config into container. Start OpenVPN manually if needed."))
@@ -610,14 +697,25 @@ class NihilController:
                         except ValueError:
                             pass
             if browser_ui_port:
-                verbose_info("Preparing browser UI...")
-                deadline = time.monotonic() + 180
-                while time.monotonic() < deadline:
-                    if browser_ui_is_page_ready(browser_ui_port):
-                        if verbose:
-                            print(self.formatter.success("Browser UI ready."))
-                        break
-                    time.sleep(2)
+                ready = False
+                loading = self._loading("Starting Browser UI...")
+                with loading:
+                    deadline = time.monotonic() + 180
+                    while time.monotonic() < deadline:
+                        try:
+                            exit_code, output = container.exec_run(["cat", "/tmp/nihil_browser_ui_status"])
+                            progress = output.decode("utf-8", errors="replace").strip() if exit_code == 0 else ""
+                            if progress and hasattr(loading, "update"):
+                                loading.update(f"[cyan]{progress}...[/]")
+                        except Exception:
+                            pass
+                        if browser_ui_is_page_ready(browser_ui_port):
+                            ready = True
+                            break
+                        time.sleep(2)
+                if ready:
+                    if verbose:
+                        print(self.formatter.success("Browser UI ready."))
                 else:
                     print(self.formatter.warning("Browser UI may still be starting; open the link from the recap when ready."))
                 session_str = browser_ui_get_session_str(container, container_name)
@@ -743,7 +841,8 @@ class NihilController:
             "NIHIL_VPN", "DISPLAY", "NIHIL_X_MODE", "XAUTHORITY",
             "_JAVA_AWT_WM_NONREPARENTING", "QT_X11_NO_MITSHM",
             "XDG_RUNTIME_DIR", "WAYLAND_DISPLAY", "NIHIL_WAYLAND",
-            "NIHIL_BROWSER_UI", "NIHIL_BROWSER_UI_PORT", "NIHIL_BROWSER_UI_PASSWORD",
+            "NIHIL_BROWSER_UI", "NIHIL_BROWSER_UI_PORT",
+            "NIHIL_BROWSER_UI_VNC_PORT", "NIHIL_BROWSER_UI_PASSWORD",
         }
         try:
             image_env_list = container.image.attrs.get("Config", {}).get("Env") or []
@@ -774,7 +873,7 @@ class NihilController:
             if browser_ui_session:
                 table.add_row("Session (browser)", f"[green]{browser_ui_session}[/]")
             else:
-                table.add_row("Session (browser)", "[dim](see browser page)[/]")
+                table.add_row("Session (browser)", "[dim]root, password in /opt/nihil/.session_password[/]")
         if update_available is True:
             table.add_row("Image update", "[yellow]Update available[/] → run [bold cyan]nihil update[/]")
         elif update_available is False:
@@ -809,14 +908,56 @@ class NihilController:
                     errors += 1
                     continue
                 with self._loading(f"Restarting container '{container_name}'..."):
-                    if container.status == "running":
-                        self.manager.stop_container(container)
-                    self.manager.start_container(container)
+                    resolution = getattr(args, "browser_ui_resolution", None)
+                    env = dict(
+                        kv.split("=", 1) for kv in container.attrs.get("Config", {}).get("Env", []) if "=" in kv
+                    )
+                    if resolution and env.get("NIHIL_BROWSER_UI") == "1":
+                        snapshot = self.manager.snapshot_container_config(container)
+                        snapshot["environment"]["NIHIL_BROWSER_UI_RESOLUTION"] = resolution
+                        preserve = ["/root/.bash_history", "/root/.zsh_history", "/root/.nihil-history", "/root/.nxc", "/root/.netexec", "/root/.cme", "/root/.hashcat/hashcat.potfile", "/root/.john/john.pot"]
+                        saved_files = self.manager.extract_container_data(container, preserve)
+                        was_running = container.status == "running"
+                        if was_running:
+                            self.manager.stop_container(container)
+                        self.manager.remove_container(container, force=True)
+                        container = self.manager.recreate_container(snapshot)
+                        if was_running or saved_files:
+                            self.manager.start_container(container)
+                        if saved_files:
+                            self.manager.restore_container_data(container, saved_files)
+                        if not was_running and saved_files:
+                            self.manager.stop_container(container)
+                    else:
+                        if resolution and env.get("NIHIL_BROWSER_UI") != "1":
+                            raise ValueError(f"Browser UI is not enabled for container '{container_name}'")
+                        if container.status == "running":
+                            self.manager.stop_container(container)
+                        self.manager.start_container(container)
                 env_list = container.attrs.get("Config", {}).get("Env") or []
+                if any(e == "NIHIL_BROWSER_UI=1" for e in env_list):
+                    port = 6901
+                    for entry in env_list:
+                        if entry.startswith("NIHIL_BROWSER_UI_PORT="):
+                            try:
+                                port = int(entry.split("=", 1)[1])
+                            except ValueError:
+                                pass
+                            break
+                    print(self.formatter.info("Waiting for Browser UI..."))
+                    deadline = time.monotonic() + 180
+                    ready = browser_ui_is_page_ready(port)
+                    while time.monotonic() < deadline and not ready:
+                        time.sleep(2)
+                        ready = browser_ui_is_page_ready(port)
+                    if ready:
+                        print(self.formatter.success("Browser UI ready."))
+                    else:
+                        print(self.formatter.warning("Browser UI is still starting; open the link again when ready."))
                 if any(e in ("NIHIL_VPN=managed", "NIHIL_VPN=1") for e in env_list):
                     if not self.manager.wait_for_vpn(container, timeout=2):
                         self._start_vpn_with_feedback(container)
-            except (NihilError, APIError) as exc:
+            except (NihilError, APIError, ValueError) as exc:
                 print(self.formatter.error(f"Could not restart container '{container_name}': {exc}"), file=sys.stderr)
                 errors += 1
                 continue
@@ -1163,7 +1304,7 @@ class NihilController:
                 config_changes.append("privileged: disabled")
 
             if requested_network:
-                new_network_mode = network_map.get(requested_network, "host")
+                new_network_mode = network_map.get(requested_network, requested_network)
                 if snapshot.get("network_mode") != new_network_mode:
                     snapshot["network_mode"] = new_network_mode
                     config_changes.append(f"network: {requested_network}")
@@ -1652,7 +1793,8 @@ class NihilController:
             if not container:
                 print(self.formatter.error(f"Container '{container_name}' doesn't exist."), file=sys.stderr)
                 return 1
-            self._print_container_info(container, args, created=False)
+            session_str = browser_ui_get_session_str(container, container_name)
+            self._print_container_info(container, args, created=False, browser_ui_session=session_str)
             return 0
         print(self.formatter.info(f"Nihil version {__version__}\n"))
         print(self.formatter.info(f"Active image source: {self.formatter.image_source(self.config.image_source_active)}"))
@@ -1757,6 +1899,8 @@ class NihilController:
 
     def _cmd_config(self, args) -> int:
         from nihil.config import CONFIG_FILE
+        if getattr(args, "config_action", None) == "preset":
+            return self._cmd_config_preset(args)
         if getattr(args, "edit", False):
             import shutil
             import subprocess
@@ -1777,6 +1921,7 @@ class NihilController:
             table.add_row("", "")
             table.add_row("[bold]network.default_network[/]", cfg.default_network)
             table.add_row("[bold]workspace.default_path[/]", str(cfg.default_workspace) if cfg.default_workspace else "[dim]none[/]")
+            table.add_row("[bold]container_defaults.privileged[/]", "[green]yes[/]" if cfg.default_privileged else "[red]no[/]")
             table.add_row("[bold]shell.default_shell[/]", cfg.default_shell)
             table.add_row("[bold]shell.logging.always_enable[/]", "[green]yes[/]" if cfg.logging_always_enable else "[red]no[/]")
             table.add_row("[bold]shell.logging.method[/]", cfg.logging_method)
@@ -1792,6 +1937,78 @@ class NihilController:
             print(self.formatter.info(f"Edit: nihil config --edit  or  $EDITOR {CONFIG_FILE}"))
         except ImportError:
             print(f"Config file: {CONFIG_FILE}")
+        return 0
+
+    def _cmd_config_preset(self, args) -> int:
+        from nihil.features.config_presets import (
+            create_preset, delete_preset, list_presets, save_preset, preset_path,
+        )
+
+        try:
+            if args.preset_action == "create":
+                from nihil.features.config_presets import edit_preset_config
+                fields = (
+                    "privileged", "network", "image", "workspace", "workspace_here", "vpn", "env",
+                    "disable_x11", "disable_wayland", "no_my_resources", "no_nihil_resources",
+                    "browser_ui", "browser_ui_resolution", "browser_ui_port", "browser_ui_password",
+                    "log", "tmux", "no_shell",
+                )
+                options = {
+                    field: getattr(args, field)
+                    for field in fields
+                    if getattr(args, field) is not None
+                    and (field != "browser_ui_resolution" or args.browser_ui_resolution_explicit)
+                }
+                scripts = None
+                if args.script:
+                    if not sys.stdin.isatty():
+                        print(self.formatter.error("Use --startup-script NAME when selecting scripts without a terminal."), file=sys.stderr)
+                        return 1
+                    from nihil.features.startup_scripts import select_startup_scripts
+                    from nihil.features.config_presets import SETUP_DIR
+                    scripts = select_startup_scripts()
+                    if scripts is None:
+                        print(self.formatter.info("Preset creation cancelled."))
+                        return 1
+                    options["scripts"] = [str(script.relative_to(SETUP_DIR)) for script in scripts]
+                elif args.startup_script:
+                    from nihil.features.config_presets import SETUP_DIR
+                    from nihil.features.startup_scripts import resolve_startup_scripts
+                    scripts = resolve_startup_scripts(args.startup_script)
+                    options["scripts"] = [str(script.relative_to(SETUP_DIR)) for script in scripts]
+                noninteractive_options = set(options) - {"scripts"}
+                config_data = None
+                if not noninteractive_options and not args.startup_script and sys.stdin.isatty():
+                    edited = edit_preset_config()
+                    if edited is None:
+                        print(self.formatter.info("Preset creation cancelled."))
+                        return 1
+                    config_data, edited_options = edited
+                    options.update(edited_options)
+                path = create_preset(args.name, options=options, config_data=config_data)
+                print(self.formatter.success(f"Created config preset '{args.name}'."))
+            elif args.preset_action == "save":
+                path = save_preset(args.name, overwrite=args.force)
+                print(self.formatter.success(f"Saved config preset '{args.name}' to {path}."))
+            elif args.preset_action == "edit":
+                path = preset_path(args.name)
+                import shutil
+                import subprocess
+                editor = os.environ.get("EDITOR") or shutil.which("nano") or shutil.which("vi") or "vi"
+                if subprocess.run([editor, str(path)]).returncode:
+                    print(self.formatter.error(f"Editor failed. Preset remains at {path}."), file=sys.stderr)
+                    return 1
+                NihilConfig.from_file(path)
+                print(self.formatter.success(f"Updated config preset '{args.name}'."))
+            elif args.preset_action == "list":
+                presets = list_presets()
+                print("\n".join(presets) if presets else self.formatter.info("No config presets saved yet."))
+            elif args.preset_action == "delete":
+                delete_preset(args.name)
+                print(self.formatter.success(f"Deleted config preset '{args.name}'."))
+        except (FileExistsError, FileNotFoundError, OSError, ValueError) as e:
+            print(self.formatter.error(str(e)), file=sys.stderr)
+            return 1
         return 0
 
     def _cmd_build(self, args) -> int:
@@ -1853,7 +2070,8 @@ class NihilController:
                 "install_mod_wordlists": "Wordlists",
             }
 
-            def run_local_build(_selection, report, cancel_event):
+            def run_local_build(_selection, report, cancel_event, *, allow_tool_failures=False):
+                local_args.allow_tool_failures = allow_tool_failures
                 captured = ""
 
                 class BuildOutput(io.TextIOBase):
@@ -1912,17 +2130,18 @@ class NihilController:
                 report(1, 1, "Build complete", logs=captured)
 
             try:
-                select_tools_web(
+                selected = select_tools_web(
                     [], set(), f"Local Docker build · {variant}",
                     on_save=run_local_build, action_label="Start build",
-                    start_immediately=True, page_context="Nihil · Local Docker",
+                    allow_tool_failures=getattr(args, "allow_tool_failures", False),
+                    page_context="Nihil · Local Docker",
                     page_title="Building your local image…",
                     success_title="Local build complete",
                     initial_label="Preparing local Docker build",
                     plain_logs=True,
                     can_cancel=True,
                 )
-                return result.get("code", 1)
+                return result.get("code", 0 if selected is None else 1)
             except RuntimeError as exc:
                 print(build_error(str(exc)), file=sys.stderr)
                 return result.get("code", 1)
@@ -2061,6 +2280,8 @@ class NihilController:
             "--build-arg", "VERSION=local",
             "--build-arg", f"BUILD_DATE={build_date}",
         ]
+        if getattr(args, "allow_tool_failures", False):
+            cmd.extend(["--build-arg", "NIHIL_AUDIT=1"])
         from nihil.utils import get_image_platform
         image_platform = get_image_platform()
         if image_platform:
@@ -2080,6 +2301,8 @@ class NihilController:
         print(build_info("Build plan", f"{len(step_labels)} phases ({module_count} modules)", self.formatter.BLUE))
         print(build_info("Source", str(source), self.formatter.GREEN))
         print(build_info("Dockerfile", DOCKERFILES[variant], self.formatter.MAGENTA))
+        if getattr(args, "allow_tool_failures", False):
+            print(build_info("Tool failures", "Allowed for non-core tools; report: /opt/nihil/build/config/build-failures.log", self.formatter.YELLOW))
         if log_path:
             print(build_info("Build log", f"{log_path}  (tail -f {log_path})", self.formatter.CYAN))
         print()
@@ -2140,6 +2363,9 @@ class NihilController:
                 if label.startswith("RUN"):
                     label = "RUN Nihil build phases" if "./entrypoint.sh" in label else "RUN prepare runtime"
                 print(build_info(f"Dockerfile {index}/{total}", label, self.formatter.MAGENTA))
+                return
+            if "[NIHIL AUDIT]" in line:
+                print(build_info("Tools", line.split("[NIHIL AUDIT]", 1)[1].strip(), self.formatter.YELLOW))
                 return
             marker = re.search(r"\[NIHIL\]\s+Starting build step:\s+([\w]+)", line)
             if marker:
@@ -2250,24 +2476,32 @@ class NihilController:
                 if args.web:
                     from nihil.features.tool_selector_web import select_tools_web
 
-                    def run_github_build(_selection, report, cancel_event):
+                    def run_github_build(_selection, report, cancel_event, *, allow_tool_failures=False):
                         manager.trigger_build(
                             variant=args.variant, wait=True,
+                            allow_tool_failures=allow_tool_failures,
                             progress_callback=report, cancel_event=cancel_event,
                         )
 
-                    select_tools_web(
+                    selected = select_tools_web(
                         [], set(), f"GitHub Actions build · {args.variant}",
-                        on_save=run_github_build, start_immediately=True,
+                        on_save=run_github_build, action_label="Start build",
+                        allow_tool_failures=getattr(args, "allow_tool_failures", False),
                         can_cancel=True, page_context="Nihil · GitHub Actions",
                         page_title="Building your image…",
                         success_title="Image build complete",
                         initial_label="Dispatching GitHub Actions",
                     )
+                    if selected is None:
+                        print("Build cancelled.")
+                        return 0
                     print(self.formatter.success(f"Image build finished: {args.variant}"))
                     return 0
 
-                repo, branch = manager.trigger_build(variant=args.variant, wait=args.wait)
+                repo, branch = manager.trigger_build(
+                    variant=args.variant, wait=args.wait,
+                    allow_tool_failures=getattr(args, "allow_tool_failures", False),
+                )
                 print(self.formatter.success(
                     f"Docker build workflow dispatched for {repo}:{branch}"
                 ))
@@ -2337,6 +2571,7 @@ class NihilController:
                 path, fork_repo, branch = source_manager.ensure_personal_fork(
                     variant=args.variant,
                     git_protocol=args.git_protocol,
+                    base_branch=getattr(args, "branch", None),
                     delete_existing=delete_mode or False,
                 )
         except ImageSourceError as exc:
@@ -2350,6 +2585,7 @@ class NihilController:
                             path, fork_repo, branch = source_manager.ensure_personal_fork(
                                 variant=args.variant,
                                 git_protocol=args.git_protocol,
+                                base_branch=getattr(args, "branch", None),
                                 delete_existing=delete_mode or False,
                             )
                     except (subprocess.CalledProcessError, ImageSourceError) as retry_exc:
@@ -2372,6 +2608,15 @@ class NihilController:
             print(self.formatter.error(f"Could not read tools manifest: {exc}"), file=sys.stderr)
             return 1
 
+        keep_tools = getattr(args, "keep_tools", False)
+        repos = [
+            entry["github_repo"] for entries in manifest.values() for entry in entries
+            if isinstance(entry.get("github_repo"), str)
+        ]
+        about = {}
+        if repos and not keep_tools:
+            with self._loading("Fetching GitHub tool descriptions..."):
+                about = source_manager.github_about(repos)
         tools = []
         for category, entries in manifest.items():
             for entry in entries:
@@ -2380,14 +2625,25 @@ class NihilController:
                     "cmd": entry.get("cmd") or "-",
                     "category": category,
                     "mandatory": category == "core_tools",
+                    "description": about.get(entry.get("github_repo")) or entry.get("description", ""),
                 })
         tools.sort(key=lambda item: (item["category"], item["name"].lower()))
 
         selection_path = path / "build" / "config" / "tool-selection.json"
+        if keep_tools and not selection_path.is_file():
+            print(self.formatter.error("No saved tool selection found. Run customize without --keep-tools first."), file=sys.stderr)
+            return 1
         disabled: set[str] = set()
         if selection_path.is_file():
             try:
                 selection = json.loads(selection_path.read_text(encoding="utf-8"))
+                if keep_tools and (
+                    not isinstance(selection, dict)
+                    or not any(key in selection for key in ("enabled_tools", "disabled_tools"))
+                    or any(not isinstance(selection[key], list) or not all(isinstance(name, str) for name in selection[key])
+                           for key in ("enabled_tools", "disabled_tools") if key in selection)
+                ):
+                    raise ValueError("Invalid saved tool selection")
                 if "enabled_tools" in selection:
                     enabled = {str(name) for name in selection.get("enabled_tools", [])}
                     selected_names = {name.lower() for name in enabled}
@@ -2400,7 +2656,10 @@ class NihilController:
                         name for name in selection.get("disabled_tools", [])
                         if str(name).lower() != "nihil-history"
                     }
-            except (OSError, json.JSONDecodeError):
+            except (OSError, ValueError) as exc:
+                if keep_tools:
+                    print(self.formatter.error(f"Cannot reuse saved tool selection: {exc}"), file=sys.stderr)
+                    return 1
                 disabled = set()
 
         mandatory_names = {tool["name"].lower() for tool in tools if tool["mandatory"]}
@@ -2428,12 +2687,12 @@ class NihilController:
                     ["git", "commit", "-m", f"Customize {args.variant} image tools", "--", selection_file],
                     cwd=path, check=True,
                 )
-                subprocess.run(["git", "push", "--set-upstream", "origin", branch], cwd=path, check=True)
             elif changed.returncode != 0:
                 raise subprocess.CalledProcessError(changed.returncode, changed.args)
+            subprocess.run(["git", "push", "--set-upstream", "origin", branch], cwd=path, check=True)
 
         if getattr(args, "web", False):
-            def apply_and_build(selected: set[str], report, cancel_event) -> None:
+            def apply_and_build(selected: set[str], report, cancel_event, *, allow_tool_failures=False) -> None:
                 report(0, 0, "Saving tool selection")
                 save_selection(selected)
                 if args.no_push:
@@ -2445,7 +2704,7 @@ class NihilController:
                 source_manager.activate_personal(path, fork_repo, branch)
                 source_manager.trigger_build(
                     variant=args.variant, wait=True, progress_callback=report,
-                    cancel_event=cancel_event,
+                    cancel_event=cancel_event, allow_tool_failures=allow_tool_failures,
                 )
 
             try:
@@ -2456,6 +2715,7 @@ class NihilController:
                     on_save=apply_and_build,
                     action_label="Save locally" if args.no_push else "Apply & build",
                     can_cancel=not args.no_push,
+                    allow_tool_failures=None if args.no_push else False,
                 )
             except (RuntimeError, subprocess.CalledProcessError, ImageSourceError) as exc:
                 print(self.formatter.error(f"Web customization failed: {exc}"), file=sys.stderr)
@@ -2470,14 +2730,17 @@ class NihilController:
             return 0
 
         while True:
-            selected = self._select_tools_tui(tools, disabled, title=f"{fork_repo}:{branch}")
+            selected = disabled if keep_tools else self._select_tools_tui(tools, disabled, title=f"{fork_repo}:{branch}")
             if selected is None:
                 print("Tool selection cancelled.")
                 return 0
             disabled = selected
 
-            enabled_count = save_selection(disabled)
-            print(self.formatter.success(f"Saved tool selection: {enabled_count} enabled"))
+            if keep_tools:
+                print(self.formatter.info("Reusing saved tool selection."))
+            else:
+                enabled_count = save_selection(disabled)
+                print(self.formatter.success(f"Saved tool selection: {enabled_count} enabled"))
 
             if args.no_push:
                 source_manager.activate_personal(path, fork_repo, branch)
@@ -2496,7 +2759,7 @@ class NihilController:
                 return 0
 
             print(self.formatter.info(f"Changes remain local on {branch}: {path}"))
-            if not Confirm.ask("Relaunch the tool selector?", default=True):
+            if keep_tools or not Confirm.ask("Relaunch the tool selector?", default=True):
                 source_manager.activate_personal(path, fork_repo, branch)
                 return 0
 
@@ -2515,13 +2778,14 @@ class NihilController:
     def _select_tools_web(
         self, tools: list[dict], disabled: set[str], *, title: str,
         on_save=None, action_label: str = "Apply selection", can_cancel: bool = False,
+        allow_tool_failures: bool | None = None,
     ) -> set[str] | None:
         """Run the localhost browser selector and return the disabled tools."""
         from nihil.features.tool_selector_web import select_tools_web
 
         return select_tools_web(
             tools, disabled, title, on_save=on_save, action_label=action_label,
-            can_cancel=can_cancel,
+            can_cancel=can_cancel, allow_tool_failures=allow_tool_failures,
         )
 
     def _cmd_resources(self, args) -> int:

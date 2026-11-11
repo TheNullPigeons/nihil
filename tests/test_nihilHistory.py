@@ -100,6 +100,12 @@ class TestNihilHistory:
         assert "acme-corp" not in content.replace("nihil start acme-corp", "", 1)
         assert content.strip() == "nihil start acme-corp --workspace *** --vpn ***"
 
+    def test_log_command_redacts_vpn_password(self, temp_history_path):
+        log_command(["start", "c1", "--vpn-user", "alice", "--vpn-pass", "s3cret"], exit_code=0)
+
+        content = temp_history_path.read_text()
+        assert content.strip() == "nihil start c1 --vpn-user alice --vpn-pass ***"
+
     def test_log_command_keeps_bare_vpn_flag(self, temp_history_path):
         """--vpn with no value (nargs='?') must not swallow the next flag."""
         log_command(["start", "c1", "--vpn", "--privileged"], exit_code=0)
