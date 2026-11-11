@@ -124,14 +124,29 @@ class NihilConfig:
         if not CONFIG_FILE.exists():
             self._write_defaults()
             return _deep_copy(_DEFAULT_CONFIG)
+        import sys
         try:
             with CONFIG_FILE.open("r", encoding="utf-8") as fh:
                 data = yaml.safe_load(fh) or {}
-        except Exception:
+        except (OSError, yaml.YAMLError) as exc:
+            print(
+                f"Warning: could not read {CONFIG_FILE} ({exc}); using built-in defaults "
+                "for this run. Fix the file to restore your settings.",
+                file=sys.stderr,
+            )
             data = {}
             persist_defaults = False
         else:
-            persist_defaults = True
+            if not isinstance(data, dict):
+                print(
+                    f"Warning: {CONFIG_FILE} is not a YAML mapping; using built-in defaults "
+                    "for this run. Fix the file to restore your settings.",
+                    file=sys.stderr,
+                )
+                data = {}
+                persist_defaults = False
+            else:
+                persist_defaults = True
         merged = _deep_merge(_DEFAULT_CONFIG, data)
         if persist_defaults and merged != data:
             self._data = merged
