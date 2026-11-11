@@ -1034,6 +1034,22 @@ class NihilController:
                 self._wipe_workspace(container_name, workspace_path, skip_confirm=args.force)
         return 1 if errors > 0 else 0
 
+    @staticmethod
+    def _is_protected_path(path: Path) -> bool:
+        """True for paths too dangerous to ever delete: the filesystem root, the
+        home directory, or any directory that contains the home or the current
+        working directory. This guard is never bypassed, even with --force."""
+        try:
+            resolved = path.expanduser().resolve()
+        except (OSError, RuntimeError):
+            return True  # cannot resolve: refuse rather than risk it
+        home = Path.home().resolve()
+        cwd = Path.cwd().resolve()
+        protected = {Path(resolved.anchor), home}
+        protected.update(home.parents)
+        protected.update(cwd.parents)
+        return resolved in protected
+
     def _wipe_workspace(self, container_name: str, workspace_path: Optional[str], skip_confirm: bool) -> None:
         """Permanently delete a container's /workspace directory on the host, once it has been removed."""
         import shutil
@@ -1042,6 +1058,13 @@ class NihilController:
             print(self.formatter.info(f"No /workspace mount found for '{container_name}'; nothing to wipe."))
             return
         path = Path(workspace_path)
+        if self._is_protected_path(path):
+            print(self.formatter.error(
+                f"Refusing to wipe '{path}': it is a protected directory "
+                "(filesystem root, your home, or a parent of your working directory). "
+                "Delete it manually if you really mean to."
+            ), file=sys.stderr)
+            return
         if not path.exists():
             print(self.formatter.info(f"Workspace already gone: {path}"))
             return

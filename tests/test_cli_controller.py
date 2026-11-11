@@ -524,3 +524,38 @@ class TestResolveDisplayForwarding:
         x11, wayland, messages = NihilController._resolve_display_forwarding(False, False, True)
         assert (x11, wayland) == (False, False)
         assert messages == []
+
+
+class TestWipeWorkspaceGuard:
+    """The --wipe guard must never delete a catastrophic host path, even with --force."""
+
+    def _controller(self):
+        from nihil.cli.controller import NihilController
+        from nihil.console import NihilFormatter
+        controller = object.__new__(NihilController)
+        controller.formatter = NihilFormatter(use_colors=False)
+        return controller
+
+    def test_protected_paths_detected(self):
+        from pathlib import Path
+        c = self._controller()
+        assert c._is_protected_path(Path("/")) is True
+        assert c._is_protected_path(Path.home()) is True
+        assert c._is_protected_path(Path.home().parent) is True
+
+    def test_wipe_refuses_home_even_with_force(self, monkeypatch):
+        from pathlib import Path
+        c = self._controller()
+        called = []
+        monkeypatch.setattr("shutil.rmtree", lambda *a, **k: called.append(a))
+        c._wipe_workspace("box", str(Path.home()), skip_confirm=True)
+        assert called == []  # guard blocked the deletion
+
+    def test_wipe_deletes_a_safe_dir_with_force(self, tmp_path, monkeypatch):
+        c = self._controller()
+        target = tmp_path / "ws"
+        target.mkdir()
+        (target / "file.txt").write_text("x")
+        # A deep temp dir is not protected: --force wipes it without a prompt.
+        c._wipe_workspace("box", str(target), skip_confirm=True)
+        assert not target.exists()
