@@ -206,11 +206,16 @@ def test_distant_cleanup_deletes_branch_and_all_variant_packages(tmp_path):
         "gh", "api", "--method", "DELETE",
         "repos/alice/nihil-images/git/refs/heads/nihil/web-custom",
     ] in calls
+    # Each variant package is inspected by version, not deleted wholesale.
     for package in ("full", "ad", "web", "defender", "mobile"):
+        assert [
+            "gh", "api", "--paginate",
+            f"users/alice/packages/container/{package}/versions",
+        ] in calls
         assert [
             "gh", "api", "--method", "DELETE",
             f"users/alice/packages/container/{package}",
-        ] in calls
+        ] not in calls
 
 
 def test_distant_cleanup_suggests_refreshing_package_scopes(tmp_path):
@@ -711,3 +716,42 @@ def test_image_build_cli_forwards_tool_failure_mode(tmp_path, monkeypatch, web, 
         command.append("--web")
     assert controller._cmd_image(create_parser().parse_args(command)) == 0
     assert source.trigger_build.call_args.kwargs["allow_tool_failures"] is (chosen if web else True)
+
+
+def test_delete_remote_customization_removes_only_tagged_versions(tmp_path):
+    import json as _json
+    from types import SimpleNamespace
+    from nihil.features.image_sources import ImageSourceManager
+
+    config = SimpleNamespace(
+        image_sources_home=tmp_path,
+        image_sources_upstream_path=tmp_path / "upstream" / "nihil-images",
+    )
+    manager = ImageSourceManager(config)
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        url = command[-1]
+        if "git/refs/heads" in url:
+            return ""
+        if url.endswith("/full/versions"):
+            return _json.dumps([
+                {"id": 111, "metadata": {"container": {"tags": ["nihil-web-custom"]}}},
+                {"id": 222, "metadata": {"container": {"tags": ["latest", "main"]}}},
+            ])
+        if url.endswith("/versions"):
+            return "[]"
+        return ""
+
+    manager._run = fake_run
+    manager._delete_remote_customization("alice/nihil-images", "nihil/web-custom")
+
+    deletes = [c[-1] for c in calls if "--method" in c and "DELETE" in c]
+    # The branch-tagged version is deleted...
+    assert "users/alice/packages/container/full/versions/111" in deletes
+    # ...the differently-tagged version is kept...
+    assert "users/alice/packages/container/full/versions/222" not in deletes
+    # ...and no whole package is ever deleted.
+    assert not any(d.rstrip("/").endswith("/packages/container/full") for d in deletes)
+    assert not any("/versions/" not in d and "/packages/container/" in d for d in deletes)
