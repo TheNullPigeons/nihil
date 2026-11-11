@@ -1913,15 +1913,20 @@ class NihilController:
             print("  No nihil containers found.")
         return 0
 
+    @staticmethod
+    def _editor_command(path) -> list:
+        """Build the editor argv, honouring an $EDITOR that carries flags (e.g. 'code --wait')."""
+        import shutil as _shutil
+        editor = os.environ.get("EDITOR") or _shutil.which("nano") or _shutil.which("vi") or "vi"
+        return shlex.split(editor) + [str(path)]
+
     def _cmd_config(self, args) -> int:
         from nihil.config import CONFIG_FILE
         if getattr(args, "config_action", None) == "preset":
             return self._cmd_config_preset(args)
         if getattr(args, "edit", False):
-            import shutil
             import subprocess
-            editor = os.environ.get("EDITOR") or shutil.which("nano") or shutil.which("vi") or "vi"
-            subprocess.run([editor, str(CONFIG_FILE)])
+            subprocess.run(self._editor_command(CONFIG_FILE))
             return 0
         # Affichage de la config courante
         try:
@@ -2008,10 +2013,8 @@ class NihilController:
                 print(self.formatter.success(f"Saved config preset '{args.name}' to {path}."))
             elif args.preset_action == "edit":
                 path = preset_path(args.name)
-                import shutil
                 import subprocess
-                editor = os.environ.get("EDITOR") or shutil.which("nano") or shutil.which("vi") or "vi"
-                if subprocess.run([editor, str(path)]).returncode:
+                if subprocess.run(self._editor_command(path)).returncode:
                     print(self.formatter.error(f"Editor failed. Preset remains at {path}."), file=sys.stderr)
                     return 1
                 NihilConfig.from_file(path)

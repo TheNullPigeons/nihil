@@ -573,3 +573,17 @@ class TestWipeWorkspaceGuard:
         c._wipe_workspace("box", str(target), skip_confirm=False)
         assert called == []
         assert target.exists()
+
+
+class TestEditorCommand:
+    """$EDITOR may carry flags (e.g. 'code --wait'); the argv must split them out."""
+
+    def test_editor_with_flags_is_split(self, monkeypatch):
+        from nihil.cli.controller import NihilController
+        monkeypatch.setenv("EDITOR", "code --wait")
+        assert NihilController._editor_command("/tmp/x.yml") == ["code", "--wait", "/tmp/x.yml"]
+
+    def test_plain_editor(self, monkeypatch):
+        from nihil.cli.controller import NihilController
+        monkeypatch.setenv("EDITOR", "nano")
+        assert NihilController._editor_command("/tmp/x.yml") == ["nano", "/tmp/x.yml"]
