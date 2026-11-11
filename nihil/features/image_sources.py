@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import shutil
 import json
@@ -152,6 +153,31 @@ class ImageSourceManager:
             pass
         ssh_dir = Path.home() / ".ssh"
         return ssh_dir.is_dir() and any(ssh_dir.glob("id_*"))
+
+    def github_about(self, repos: list[str]) -> dict[str, str]:
+        """Fetch GitHub About descriptions together, keeping any partial response."""
+        repos = list(dict.fromkeys(repo for repo in repos if re.fullmatch(r"[\w.-]+/[\w.-]+", repo, re.ASCII)))
+        if not repos:
+            return {}
+        fields = []
+        for index, repo in enumerate(repos):
+            owner, name = repo.split("/")
+            fields.append(f'r{index}: repository(owner: "{owner}", name: "{name}") {{ description }}')
+        try:
+            result = subprocess.run(
+                ["gh", "api", "graphql", "-f", "query={" + " ".join(fields) + "}"],
+                capture_output=True, text=True, timeout=8, env=self._noninteractive_env(),
+                stdin=subprocess.DEVNULL,
+            )
+            data = json.loads(result.stdout).get("data") or {}
+        except (OSError, subprocess.TimeoutExpired, ValueError):
+            return {}
+        descriptions = {}
+        for index, repo in enumerate(repos):
+            description = (data.get(f"r{index}") or {}).get("description")
+            if description:
+                descriptions[repo] = description
+        return descriptions
 
     def _default_branch(self, repo: str) -> str:
         return self._run([

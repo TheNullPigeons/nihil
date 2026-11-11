@@ -67,16 +67,18 @@ def _render_page(
         for tool in entries:
             name = html.escape(tool["name"], quote=True)
             command = html.escape(str(tool.get("cmd") or "-"))
+            description = html.escape(str(tool.get("description") or ""), quote=True)
+            about = f'<span class="tool-about">{description}</span>' if description else ""
             mandatory = tool["mandatory"]
             checked = " checked" if mandatory or tool["name"] not in disabled else ""
             locked = " disabled" if mandatory else ""
             badge = '<span class="required">required</span>' if mandatory else ""
             rows.append(
-                f'<label class="tool" data-search="{name.lower()} {command.lower()} {category_search}" '
+                f'<label class="tool" data-search="{name.lower()} {command.lower()} {category_search} {description.lower()}" '
                 f'data-category="{category_value}">'
                 f'<input type="checkbox" name="enabled" value="{name}"{checked}{locked}>'
                 f'<span class="checkmark"></span><span class="tool-copy"><b>{name}</b>'
-                f'<code>$ {command}</code></span>{badge}</label>'
+                f'<code>$ {command}</code>{about}</span>{badge}</label>'
             )
         groups.append(
             f'<section class="group" data-group><div class="group-head"><label class="category-toggle">'
@@ -119,6 +121,7 @@ button:hover,.cancel:hover {{ border-color:#32b4e3; color:#32b4e3 }}
 .tool:hover {{ border-color:#686568; background:#232226 }} .tool:has(input:checked) {{ border-color:#32b4e388; background:linear-gradient(135deg,#32b4e318,#19191c 72%) }}
 .tool input {{ position:absolute; opacity:0; pointer-events:none }} .checkmark {{ flex:none; width:20px; height:20px; border:1px solid #686568 }}
 .tool input:checked + .checkmark {{ border-color:#32b4e3; background:#32b4e3 }} .tool input:checked + .checkmark:after {{ content:'✓'; display:block; color:#141416; text-align:center; font-weight:900; line-height:18px }}
+.tool-about {{ color:#b3acaa; font-size:12px; overflow-wrap:anywhere }}
 .tool-copy {{ min-width:0; display:flex; flex:1; flex-direction:column; gap:4px }} .tool-copy b {{ overflow:hidden; color:#f3eee5; text-overflow:ellipsis; font-size:14px }} code {{ overflow:hidden; color:#918d8c; font:10px 'IBM Plex Mono',monospace; text-overflow:ellipsis }}
 .required {{ align-self:flex-start; color:#b45309; font:9px 'IBM Plex Mono',monospace; letter-spacing:.08em; text-transform:uppercase }} .tool:has(input:disabled) {{ cursor:default }}
 .actions {{ position:fixed; z-index:3; right:0; bottom:0; left:0; border-top:1px solid #333136; background:#141416ed; backdrop-filter:blur(16px) }} .actions-inner {{ display:flex; align-items:center; justify-content:space-between; width:min(1760px,calc(100% - 64px)); margin:auto; padding:14px 0 }}

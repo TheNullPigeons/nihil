@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from rich.text import Text
 from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -96,7 +97,7 @@ class ToolSelectorApp(App[set[str] | None]):
             return True
         return any(
             self.search_query in str(tool.get(field, "")).lower()
-            for field in ("name", "category", "cmd")
+            for field in ("name", "category", "cmd", "description")
         )
 
     def _render_table(self) -> None:
@@ -118,13 +119,15 @@ class ToolSelectorApp(App[set[str] | None]):
         table.add_column("TOOL")
         table.add_column("CATEGORY")
         table.add_column("COMMAND")
+        table.add_column("DESCRIPTION")
         for row, index in enumerate(self.visible_indices):
             tool = self.tools[index]
             enabled = tool["mandatory"] or tool["name"] not in self.disabled
             marker = "▶" if row in visual_rows else " "
             state = "REQ" if tool["mandatory"] else ("ON" if enabled else "OFF")
             table.add_row(
-                marker, state, tool["name"], tool["category"], tool.get("cmd", "-"), key=str(index)
+                marker, state, tool["name"], tool["category"], tool.get("cmd", "-"),
+                Text(tool.get("description") or ""), key=str(index)
             )
         if self.visible_indices:
             table.move_cursor(row=cursor, column=0)

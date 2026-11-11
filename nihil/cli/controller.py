@@ -2602,6 +2602,15 @@ class NihilController:
             print(self.formatter.error(f"Could not read tools manifest: {exc}"), file=sys.stderr)
             return 1
 
+        keep_tools = getattr(args, "keep_tools", False)
+        repos = [
+            entry["github_repo"] for entries in manifest.values() for entry in entries
+            if isinstance(entry.get("github_repo"), str)
+        ]
+        about = {}
+        if repos and not keep_tools:
+            with self._loading("Fetching GitHub tool descriptions..."):
+                about = source_manager.github_about(repos)
         tools = []
         for category, entries in manifest.items():
             for entry in entries:
@@ -2610,11 +2619,11 @@ class NihilController:
                     "cmd": entry.get("cmd") or "-",
                     "category": category,
                     "mandatory": category == "core_tools",
+                    "description": about.get(entry.get("github_repo")) or entry.get("description", ""),
                 })
         tools.sort(key=lambda item: (item["category"], item["name"].lower()))
 
         selection_path = path / "build" / "config" / "tool-selection.json"
-        keep_tools = getattr(args, "keep_tools", False)
         if keep_tools and not selection_path.is_file():
             print(self.formatter.error("No saved tool selection found. Run customize without --keep-tools first."), file=sys.stderr)
             return 1
