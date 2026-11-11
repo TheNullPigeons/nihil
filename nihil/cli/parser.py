@@ -178,7 +178,7 @@ Examples:
     image_build = image_subparsers.add_parser("build", help="Trigger a GitHub Actions image build")
     image_build.add_argument("variant", choices=["all", "full", "ad", "web", "blueteam"], nargs="?", default="all", help="Image variant to build (default: all)")
     image_build.add_argument("--wait", action="store_true", help="Wait until the GitHub Actions build finishes")
-    image_build.add_argument("--web", action="store_true", help="Follow the GitHub Actions build in a local browser page")
+    image_build.add_argument("--web", action="store_true", help="Configure and follow the GitHub Actions build in a local browser page")
     image_build.add_argument("--allow-tool-failures", action="store_true", help="Continue after non-core tool failures and keep a report in the image")
     subparsers.add_parser("version", help="Display Nihil version")
 
@@ -276,7 +276,7 @@ Examples:
     build_parser.add_argument("--ref", metavar="REF", default=None, help="Remote branch or tag (default: active source branch/channel)")
     build_parser.add_argument("--no-cache", action="store_true", help="Pass --no-cache to docker build")
     build_parser.add_argument("--verbose", "-v", action="store_true", help="Show complete Docker build output (default: major steps only)")
-    build_parser.add_argument("--web", action="store_true", help="Show local Docker build progress in a browser")
+    build_parser.add_argument("--web", action="store_true", help="Configure the local Docker build and follow progress in a browser")
     build_parser.add_argument("--allow-tool-failures", action="store_true", help="Continue after non-core tool failures and keep a report in the image")
     build_parser.add_argument("--tag", "-t", metavar="TAG", default=None, help="Custom image tag (default: nihil/<variant>:local)")
     build_parser.add_argument("--log", "-l", metavar="FILE", default=None, help="Write build output to a log file (use 'tail -f FILE' to follow)")

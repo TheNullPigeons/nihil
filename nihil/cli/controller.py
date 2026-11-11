@@ -2070,7 +2070,8 @@ class NihilController:
                 "install_mod_wordlists": "Wordlists",
             }
 
-            def run_local_build(_selection, report, cancel_event):
+            def run_local_build(_selection, report, cancel_event, *, allow_tool_failures=False):
+                local_args.allow_tool_failures = allow_tool_failures
                 captured = ""
 
                 class BuildOutput(io.TextIOBase):
@@ -2129,17 +2130,18 @@ class NihilController:
                 report(1, 1, "Build complete", logs=captured)
 
             try:
-                select_tools_web(
+                selected = select_tools_web(
                     [], set(), f"Local Docker build · {variant}",
                     on_save=run_local_build, action_label="Start build",
-                    start_immediately=True, page_context="Nihil · Local Docker",
+                    allow_tool_failures=getattr(args, "allow_tool_failures", False),
+                    page_context="Nihil · Local Docker",
                     page_title="Building your local image…",
                     success_title="Local build complete",
                     initial_label="Preparing local Docker build",
                     plain_logs=True,
                     can_cancel=True,
                 )
-                return result.get("code", 1)
+                return result.get("code", 0 if selected is None else 1)
             except RuntimeError as exc:
                 print(build_error(str(exc)), file=sys.stderr)
                 return result.get("code", 1)
@@ -2474,21 +2476,25 @@ class NihilController:
                 if args.web:
                     from nihil.features.tool_selector_web import select_tools_web
 
-                    def run_github_build(_selection, report, cancel_event):
+                    def run_github_build(_selection, report, cancel_event, *, allow_tool_failures=False):
                         manager.trigger_build(
                             variant=args.variant, wait=True,
-                            allow_tool_failures=getattr(args, "allow_tool_failures", False),
+                            allow_tool_failures=allow_tool_failures,
                             progress_callback=report, cancel_event=cancel_event,
                         )
 
-                    select_tools_web(
+                    selected = select_tools_web(
                         [], set(), f"GitHub Actions build · {args.variant}",
-                        on_save=run_github_build, start_immediately=True,
+                        on_save=run_github_build, action_label="Start build",
+                        allow_tool_failures=getattr(args, "allow_tool_failures", False),
                         can_cancel=True, page_context="Nihil · GitHub Actions",
                         page_title="Building your image…",
                         success_title="Image build complete",
                         initial_label="Dispatching GitHub Actions",
                     )
+                    if selected is None:
+                        print("Build cancelled.")
+                        return 0
                     print(self.formatter.success(f"Image build finished: {args.variant}"))
                     return 0
 
@@ -2686,7 +2692,7 @@ class NihilController:
             subprocess.run(["git", "push", "--set-upstream", "origin", branch], cwd=path, check=True)
 
         if getattr(args, "web", False):
-            def apply_and_build(selected: set[str], report, cancel_event) -> None:
+            def apply_and_build(selected: set[str], report, cancel_event, *, allow_tool_failures=False) -> None:
                 report(0, 0, "Saving tool selection")
                 save_selection(selected)
                 if args.no_push:
@@ -2698,7 +2704,7 @@ class NihilController:
                 source_manager.activate_personal(path, fork_repo, branch)
                 source_manager.trigger_build(
                     variant=args.variant, wait=True, progress_callback=report,
-                    cancel_event=cancel_event,
+                    cancel_event=cancel_event, allow_tool_failures=allow_tool_failures,
                 )
 
             try:
@@ -2709,6 +2715,7 @@ class NihilController:
                     on_save=apply_and_build,
                     action_label="Save locally" if args.no_push else "Apply & build",
                     can_cancel=not args.no_push,
+                    allow_tool_failures=None if args.no_push else False,
                 )
             except (RuntimeError, subprocess.CalledProcessError, ImageSourceError) as exc:
                 print(self.formatter.error(f"Web customization failed: {exc}"), file=sys.stderr)
@@ -2771,13 +2778,14 @@ class NihilController:
     def _select_tools_web(
         self, tools: list[dict], disabled: set[str], *, title: str,
         on_save=None, action_label: str = "Apply selection", can_cancel: bool = False,
+        allow_tool_failures: bool | None = None,
     ) -> set[str] | None:
         """Run the localhost browser selector and return the disabled tools."""
         from nihil.features.tool_selector_web import select_tools_web
 
         return select_tools_web(
             tools, disabled, title, on_save=on_save, action_label=action_label,
-            can_cancel=can_cancel,
+            can_cancel=can_cancel, allow_tool_failures=allow_tool_failures,
         )
 
     def _cmd_resources(self, args) -> int:

@@ -353,6 +353,40 @@ class TestBuildPlatform:
 
         return popen.call_args.args[0]
 
+    @pytest.mark.parametrize("initial", [False, True])
+    @pytest.mark.parametrize("chosen", [False, True])
+    def test_local_web_build_uses_submitted_tool_failure_setting(self, tmp_path, monkeypatch, initial, chosen):
+        import threading
+        from nihil.cli.parser import create_parser
+
+        (tmp_path / "Dockerfile").touch()
+        controller = self._make_controller(tmp_path)
+        monkeypatch.setattr("select.select", lambda readers, *args: (readers, [], []))
+        def browser(*args, **kwargs):
+            assert kwargs["allow_tool_failures"] is initial
+            assert not kwargs.get("start_immediately", False)
+            kwargs["on_save"](set(), MagicMock(), threading.Event(), allow_tool_failures=chosen)
+            return set()
+        monkeypatch.setattr("nihil.features.tool_selector_web.select_tools_web", browser)
+        command = ["build", "full", "--source", str(tmp_path), "--web"]
+        if initial:
+            command.append("--allow-tool-failures")
+        process = MagicMock()
+        process.stdout.read1.return_value = b""
+        process.returncode = 0
+        with patch("subprocess.Popen", return_value=process) as popen:
+            assert controller._cmd_build(create_parser().parse_args(command)) == 0
+        assert ("NIHIL_AUDIT=1" in popen.call_args.args[0]) is chosen
+
+    def test_cancelling_web_settings_does_not_start_docker(self, tmp_path, monkeypatch):
+        from nihil.cli.parser import create_parser
+
+        monkeypatch.setattr("nihil.features.tool_selector_web.select_tools_web", lambda *args, **kwargs: None)
+        controller = self._make_controller(tmp_path)
+        with patch("subprocess.Popen") as popen:
+            assert controller._cmd_build(create_parser().parse_args(["build", "--web"])) == 0
+        popen.assert_not_called()
+
     def test_short_build_output_keeps_audit_warnings(self, tmp_path, capsys):
         (tmp_path / "Dockerfile").touch()
         controller = self._make_controller(tmp_path)
