@@ -66,3 +66,25 @@ class TestNihilConfig:
         config._data = {"display": {"wayland_by_default": True}}
 
         assert config.wayland_by_default is True
+
+
+class TestCorruptConfigWarning:
+    """A corrupt or non-mapping config.yml must warn and fall back to defaults, never crash."""
+
+    def test_corrupt_yaml_warns_and_uses_defaults(self, tmp_path, monkeypatch, capsys):
+        cfg = tmp_path / "config.yml"
+        cfg.write_text("network: {default_network: host\n  broken: [unterminated")
+        monkeypatch.setattr("nihil.config.user_config.CONFIG_FILE", cfg)
+        config = NihilConfig()
+        err = capsys.readouterr().err
+        assert "could not read" in err
+        assert config.default_network == "host"  # default still applies
+
+    def test_non_mapping_yaml_warns_and_uses_defaults(self, tmp_path, monkeypatch, capsys):
+        cfg = tmp_path / "config.yml"
+        cfg.write_text("- just\n- a\n- list\n")
+        monkeypatch.setattr("nihil.config.user_config.CONFIG_FILE", cfg)
+        config = NihilConfig()
+        err = capsys.readouterr().err
+        assert "not a YAML mapping" in err
+        assert config.default_shell == "zsh"

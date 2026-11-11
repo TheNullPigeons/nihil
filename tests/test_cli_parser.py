@@ -138,22 +138,22 @@ class TestCreateParser:
 
     def test_parse_install_ctf(self):
         parser = create_parser()
-        args = parser.parse_args(["install", "blueteam"])
+        args = parser.parse_args(["install", "defender"])
         assert args.command == "install"
-        assert args.image == "blueteam"
+        assert args.image == "defender"
 
     def test_parse_start_image_ctf(self):
         parser = create_parser()
-        args = parser.parse_args(["start", "lab", "--image", "blueteam"])
+        args = parser.parse_args(["start", "lab", "--image", "defender"])
         assert args.command == "start"
         assert args.name == "lab"
-        assert args.image == "blueteam"
+        assert args.image == "defender"
 
     def test_parse_update_ctf(self):
         parser = create_parser()
-        args = parser.parse_args(["update", "blueteam"])
+        args = parser.parse_args(["update", "defender"])
         assert args.command == "update"
-        assert args.image == "blueteam"
+        assert args.image == "defender"
 
     def test_parse_upgrade_default_no_pull(self):
         parser = create_parser()
@@ -206,9 +206,9 @@ class TestCreateParser:
 
     def test_parse_tools_ctf(self):
         parser = create_parser()
-        args = parser.parse_args(["tools", "blueteam"])
+        args = parser.parse_args(["tools", "defender"])
         assert args.command == "tools"
-        assert args.image == "blueteam"
+        assert args.image == "defender"
 
     def test_parse_doctor(self):
         parser = create_parser()

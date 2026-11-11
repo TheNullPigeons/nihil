@@ -16,6 +16,7 @@ from typing import Dict, List, Optional, Tuple
 
 from docker.errors import APIError
 from nihil.config import ensure_filesystem, NihilConfig, NIHIL_HOME
+from nihil.features.images import VARIANTS, VARIANT_DESCRIPTIONS
 from nihil.features.browser_ui import (
     save_password as browser_ui_save_password,
     load_password as browser_ui_load_password,
@@ -32,6 +33,13 @@ from nihil import __version__
 
 
 class NihilController:
+    # Dockerfile per build variant (full uses the root Dockerfile), derived from
+    # VARIANTS so every variant stays buildable. 'test' is build-only.
+    _VARIANT_DOCKERFILES = {
+        **{v: ("Dockerfile" if v == "full" else f"Dockerfile.{v}") for v in VARIANTS},
+        "test": "Dockerfile.test",
+    }
+
     def __init__(self):
         ensure_filesystem()
         self.config = NihilConfig()
@@ -278,7 +286,7 @@ class NihilController:
             tag = "dev" if self.config.image_channel == "dev" else "latest"
             self.manager.AVAILABLE_IMAGES = {
                 variant: f"ghcr.io/thenullpigeons/{variant}:{tag}"
-                for variant in ("full", "ad", "web", "blueteam")
+                for variant in VARIANTS
             }
             self.manager.DEFAULT_IMAGE = self.manager.AVAILABLE_IMAGES["full"]
             return
@@ -287,7 +295,7 @@ class NihilController:
         image_tag = branch.replace("/", "-") if branch else "latest"
         self.manager.AVAILABLE_IMAGES = {
             variant: f"ghcr.io/{owner}/{variant}:{image_tag}"
-            for variant in ("full", "ad", "web", "blueteam")
+            for variant in VARIANTS
         }
         self.manager.DEFAULT_IMAGE = self.manager.AVAILABLE_IMAGES["full"]
 
@@ -343,6 +351,55 @@ class NihilController:
                 enable_wayland = False
         return enable_x11, enable_wayland, messages
 
+    def _resolve_start_preset(self, args, container_existed: bool, verbose: bool):
+        """Resolve a --preset into (config, options, scripts) and merge it into args.
+
+        Returns an int exit code on error, or the (config, options, scripts) tuple.
+        """
+        config = self.config
+        preset_options: dict = {}
+        preset_scripts = None
+        if getattr(args, "preset", None) is None:
+            return config, preset_options, preset_scripts
+        if container_existed:
+            print(self.formatter.error("--preset can only be used when creating a new container."), file=sys.stderr)
+            return 1
+        if not args.preset and not sys.stdin.isatty():
+            print(self.formatter.error("Pass a preset name when selecting without a terminal."), file=sys.stderr)
+            return 1
+        from nihil.features.config_presets import choose_preset, load_preset, load_preset_options, load_preset_scripts
+        preset_name = args.preset or choose_preset()
+        if not preset_name:
+            print(self.formatter.error("No config preset selected."), file=sys.stderr)
+            return 1
+        try:
+            config = load_preset(preset_name)
+            preset_options = load_preset_options(preset_name)
+            preset_scripts = load_preset_scripts(preset_name, preset_options)
+        except (FileNotFoundError, ValueError) as e:
+            print(self.formatter.error(str(e)), file=sys.stderr)
+            return 1
+        self._apply_preset_options(args, preset_options)
+        if verbose:
+            print(self.formatter.info(f"Using config preset '{preset_name}'."))
+        return config, preset_options, preset_scripts
+
+    @staticmethod
+    def _apply_preset_options(args, preset_options: dict) -> None:
+        """Fill CLI args from a preset's saved container options, without overriding explicit flags."""
+        for field, value in preset_options.items():
+            if field == "scripts":
+                continue
+            if field == "env":
+                args.env = [*(value or []), *(args.env or [])]
+            elif field == "browser_ui_resolution" and args.browser_ui_resolution_explicit:
+                continue
+            elif field in {"workspace", "workspace_here"}:
+                if args.workspace is None and args.workspace_here is None:
+                    setattr(args, field, value)
+            elif getattr(args, field, None) is None:
+                setattr(args, field, value)
+
     def _cmd_start(self, args) -> int:
         _NOT_CHECKED = object()
         _update_cache = [_NOT_CHECKED]
@@ -362,41 +419,10 @@ class NihilController:
         verbose_info(f"Looking for container '{container_name}'...")
         container = self.manager.get_container(container_name)
         container_existed = container is not None
-        config = self.config
-        preset_options = {}
-        preset_scripts = None
-        if getattr(args, "preset", None) is not None:
-            if container_existed:
-                print(self.formatter.error("--preset can only be used when creating a new container."), file=sys.stderr)
-                return 1
-            if not args.preset and not sys.stdin.isatty():
-                print(self.formatter.error("Pass a preset name when selecting without a terminal."), file=sys.stderr)
-                return 1
-            from nihil.features.config_presets import choose_preset, load_preset, load_preset_options, load_preset_scripts
-            preset_name = args.preset or choose_preset()
-            if not preset_name:
-                print(self.formatter.error("No config preset selected."), file=sys.stderr)
-                return 1
-            try:
-                config = load_preset(preset_name)
-                preset_options = load_preset_options(preset_name)
-                preset_scripts = load_preset_scripts(preset_name, preset_options)
-            except (FileNotFoundError, ValueError) as e:
-                print(self.formatter.error(str(e)), file=sys.stderr)
-                return 1
-            for field, value in preset_options.items():
-                if field == "scripts":
-                    continue
-                if field == "env":
-                    args.env = [*(value or []), *(args.env or [])]
-                elif field == "browser_ui_resolution" and args.browser_ui_resolution_explicit:
-                    continue
-                elif field in {"workspace", "workspace_here"}:
-                    if args.workspace is None and args.workspace_here is None:
-                        setattr(args, field, value)
-                elif getattr(args, field, None) is None:
-                    setattr(args, field, value)
-            verbose_info(f"Using config preset '{preset_name}'.")
+        preset_result = self._resolve_start_preset(args, container_existed, verbose)
+        if isinstance(preset_result, int):
+            return preset_result
+        config, preset_options, preset_scripts = preset_result
         startup_scripts = None
         if getattr(args, "script", False):
             if not sys.stdin.isatty():
@@ -525,8 +551,10 @@ class NihilController:
                         desc = "Active Directory tools"
                     elif "web" in variant:
                         desc = "Web Hacking tools"
-                    elif "blueteam" in variant:
+                    elif "defender" in variant:
                         desc = "Blue Team / DFIR tools"
+                    elif "mobile" in variant:
+                        desc = "Mobile (Android / iOS) tools"
                     else:
                         desc = "The whole flock"
                     image_tag = all_variants[variant]
@@ -1032,6 +1060,22 @@ class NihilController:
                 self._wipe_workspace(container_name, workspace_path, skip_confirm=args.force)
         return 1 if errors > 0 else 0
 
+    @staticmethod
+    def _is_protected_path(path: Path) -> bool:
+        """True for paths too dangerous to ever delete: the filesystem root, the
+        home directory, or any directory that contains the home or the current
+        working directory. This guard is never bypassed, even with --force."""
+        try:
+            resolved = path.expanduser().resolve()
+        except (OSError, RuntimeError):
+            return True  # cannot resolve: refuse rather than risk it
+        home = Path.home().resolve()
+        cwd = Path.cwd().resolve()
+        protected = {Path(resolved.anchor), home}
+        protected.update(home.parents)
+        protected.update(cwd.parents)
+        return resolved in protected
+
     def _wipe_workspace(self, container_name: str, workspace_path: Optional[str], skip_confirm: bool) -> None:
         """Permanently delete a container's /workspace directory on the host, once it has been removed."""
         import shutil
@@ -1040,6 +1084,13 @@ class NihilController:
             print(self.formatter.info(f"No /workspace mount found for '{container_name}'; nothing to wipe."))
             return
         path = Path(workspace_path)
+        if self._is_protected_path(path):
+            print(self.formatter.error(
+                f"Refusing to wipe '{path}': it is a protected directory "
+                "(filesystem root, your home, or a parent of your working directory). "
+                "Delete it manually if you really mean to."
+            ), file=sys.stderr)
+            return
         if not path.exists():
             print(self.formatter.info(f"Workspace already gone: {path}"))
             return
@@ -1760,12 +1811,7 @@ class NihilController:
     def _cmd_images(self) -> int:
         print(self.formatter.section_header("AVAILABLE IMAGE VARIANTS"))
         rows = []
-        variant_descriptions = {
-            "full": "The whole flock, every tool, every module",
-            "ad": "Nest in their Active Directory",
-            "web": "Beak through their web apps",
-            "blueteam": "Blue Team, DFIR and threat hunting",
-        }
+        variant_descriptions = VARIANT_DESCRIPTIONS
         local_v = self.manager.list_local_variants()
         all_v = {**self.manager.AVAILABLE_IMAGES, **{k: v for k, v in local_v.items() if k not in self.manager.AVAILABLE_IMAGES}}
         registry_statuses = self._image_registry_statuses(
@@ -1798,12 +1844,7 @@ class NihilController:
             return 0
         print(self.formatter.info(f"Nihil version {__version__}\n"))
         print(self.formatter.info(f"Active image source: {self.formatter.image_source(self.config.image_source_active)}"))
-        variant_descriptions = {
-            "full": "The whole flock, every tool, every module",
-            "ad": "Nest in their Active Directory",
-            "web": "Beak through their web apps",
-            "blueteam": "Blue Team, DFIR and threat hunting",
-        }
+        variant_descriptions = VARIANT_DESCRIPTIONS
         print(self.formatter.section_header("AVAILABLE IMAGE VARIANTS"))
         rows = []
         all_variants = self.manager.AVAILABLE_IMAGES
@@ -1897,15 +1938,20 @@ class NihilController:
             print("  No nihil containers found.")
         return 0
 
+    @staticmethod
+    def _editor_command(path) -> list:
+        """Build the editor argv, honouring an $EDITOR that carries flags (e.g. 'code --wait')."""
+        import shutil as _shutil
+        editor = os.environ.get("EDITOR") or _shutil.which("nano") or _shutil.which("vi") or "vi"
+        return shlex.split(editor) + [str(path)]
+
     def _cmd_config(self, args) -> int:
         from nihil.config import CONFIG_FILE
         if getattr(args, "config_action", None) == "preset":
             return self._cmd_config_preset(args)
         if getattr(args, "edit", False):
-            import shutil
             import subprocess
-            editor = os.environ.get("EDITOR") or shutil.which("nano") or shutil.which("vi") or "vi"
-            subprocess.run([editor, str(CONFIG_FILE)])
+            subprocess.run(self._editor_command(CONFIG_FILE))
             return 0
         # Affichage de la config courante
         try:
@@ -1992,10 +2038,8 @@ class NihilController:
                 print(self.formatter.success(f"Saved config preset '{args.name}' to {path}."))
             elif args.preset_action == "edit":
                 path = preset_path(args.name)
-                import shutil
                 import subprocess
-                editor = os.environ.get("EDITOR") or shutil.which("nano") or shutil.which("vi") or "vi"
-                if subprocess.run([editor, str(path)]).returncode:
+                if subprocess.run(self._editor_command(path)).returncode:
                     print(self.formatter.error(f"Editor failed. Preset remains at {path}."), file=sys.stderr)
                     return 1
                 NihilConfig.from_file(path)
@@ -2035,13 +2079,7 @@ class NihilController:
             label = self.formatter._colorize(f"{label}:", color)
             return f"{build_timestamp()} {marker} {label} {detail}"
 
-        DOCKERFILES = {
-            "full":     "Dockerfile",
-            "ad":       "Dockerfile.ad",
-            "blueteam": "Dockerfile.blueteam",
-            "web":      "Dockerfile.web",
-            "test":     "Dockerfile.test",
-        }
+        DOCKERFILES = self._VARIANT_DOCKERFILES
 
         variant = args.variant or "full"
 

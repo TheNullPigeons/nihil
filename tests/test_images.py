@@ -21,7 +21,7 @@ class TestImagesRegistry:
         assert "full" in AVAILABLE_IMAGES
         assert "ad" in AVAILABLE_IMAGES
         assert "web" in AVAILABLE_IMAGES
-        assert "blueteam" in AVAILABLE_IMAGES
+        assert "defender" in AVAILABLE_IMAGES
 
     def test_full_and_default_match(self):
         assert AVAILABLE_IMAGES["full"] == DEFAULT_IMAGE
@@ -48,11 +48,11 @@ class TestShortImageName:
     def test_known_web_beak_returns_web(self):
         assert short_image_name("ghcr.io/thenullpigeons/web:beak") == "web"
 
-    def test_known_blueteam_returns_blueteam(self):
-        assert short_image_name("ghcr.io/thenullpigeons/blueteam:latest") == "blueteam:main"
+    def test_known_defender_returns_defender(self):
+        assert short_image_name("ghcr.io/thenullpigeons/defender:latest") == "defender:main"
 
-    def test_known_blueteam_coo_returns_blueteam(self):
-        assert short_image_name("ghcr.io/thenullpigeons/blueteam:coo") == "blueteam"
+    def test_known_defender_coo_returns_defender(self):
+        assert short_image_name("ghcr.io/thenullpigeons/defender:coo") == "defender"
 
     def test_unknown_with_slash_uses_last_part(self):
         assert short_image_name("registry/foo/bar:v1") == "bar:v1"
@@ -222,3 +222,54 @@ def test_unused_image_stops_if_container_appears_during_reference_removal():
     with pytest.raises(RuntimeError, match="now used"):
         manager.remove_unused_image("sha256:old")
     manager.client.images.remove.assert_called_once_with("sha256:old", force=False, noprune=True)
+
+
+def test_remove_image_raises_on_unexpected_docker_error():
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    import docker
+    import pytest
+    from nihil.manager import NihilManager
+    from nihil.exceptions import ImageRemoveFailed
+
+    manager = NihilManager.__new__(NihilManager)
+    manager.client = Mock()
+    manager.client.images.get.return_value = SimpleNamespace(id="sha256:deadbeef")
+    response = SimpleNamespace(status_code=500, url="http+docker://localhost/images", reason="Server Error")
+    # A 500 (not 409/404) must surface as an error instead of returning None.
+    manager.client.images.remove.side_effect = docker.errors.APIError("server error", response=response)
+    with pytest.raises(ImageRemoveFailed):
+        manager.remove_image("nihil/full:local")
+
+
+class TestVariantConsistency:
+    """A single source of truth (VARIANTS) must stay in sync with everything derived from it."""
+
+    def test_available_images_and_descriptions_cover_every_variant(self):
+        from nihil.features.images import VARIANTS, AVAILABLE_IMAGES, VARIANT_DESCRIPTIONS
+        assert set(AVAILABLE_IMAGES) == set(VARIANTS)
+        assert set(VARIANT_DESCRIPTIONS) == set(VARIANTS)
+
+    def test_parser_choices_include_every_variant(self):
+        from nihil.features.images import VARIANTS
+        from nihil.cli.parser import create_parser
+        parser = create_parser()
+        found = set()
+        for action in parser._subparsers._group_actions[0].choices.values():
+            for sub in action._actions:
+                if sub.choices:
+                    found.update(c for c in sub.choices if c in VARIANTS)
+        assert set(VARIANTS) <= found
+
+    def test_trigger_build_accepts_every_variant(self):
+        from types import SimpleNamespace
+        from nihil.features.images import VARIANTS
+        from nihil.features.image_sources import ImageSourceManager, ImageSourceError
+        config = SimpleNamespace(image_sources_home=__import__("pathlib").Path("/tmp"),
+                                 image_sources_upstream_path=__import__("pathlib").Path("/tmp"),
+                                 image_source_active="nowhere")
+        manager = ImageSourceManager(config)
+        # Unknown source raises AFTER the variant check, so a known variant gets past validation.
+        for variant in (*VARIANTS, "all"):
+            with __import__("pytest").raises(ImageSourceError, match="Unknown source"):
+                manager.trigger_build(variant=variant)

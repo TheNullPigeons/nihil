@@ -627,3 +627,31 @@ class TestNihilManager:
                 manager = NihilManager()
                 assert manager.snapshot_local_image_as_version("ghcr.io/thenullpigeons/full:latest") == "nihil/full:1.0.0-abc123def456"
                 mock_image.tag.assert_not_called()
+
+
+class TestEnvAsDict:
+    """The shared env normalizer replaces seven inline copies; it must handle every input shape."""
+
+    def test_env_as_dict_shapes(self):
+        from nihil.manager import NihilManager
+        f = NihilManager._env_as_dict
+        assert f(None) == {}
+        assert f({}) == {}
+        assert f({"A": "1"}) == {"A": "1"}
+        assert f(["A=1", "B=2"]) == {"A": "1", "B": "2"}
+        # A value that itself contains '=' is kept whole (split once).
+        assert f(["TOKEN=a=b=c"]) == {"TOKEN": "a=b=c"}
+        # Malformed entries without '=' are dropped, not crashed on.
+        assert f(["NOEQUALS", "C=3"]) == {"C": "3"}
+
+
+def test_get_container_returns_none_when_missing():
+    # get_container is the single membership check (dead container_exists was removed).
+    from unittest.mock import Mock
+    import docker
+    from nihil.manager import NihilManager
+    manager = NihilManager.__new__(NihilManager)
+    manager.client = Mock()
+    manager.client.containers.get.side_effect = docker.errors.NotFound("absent")
+    assert manager.get_container("ghost") is None
+    assert not hasattr(manager, "container_exists")

@@ -14,6 +14,8 @@ from pathlib import Path
 from urllib.parse import quote, urlparse
 
 
+from nihil.features.images import VARIANTS
+
 UPSTREAM_REPO = "TheNullPigeons/nihil-images"
 
 
@@ -196,7 +198,12 @@ class ImageSourceManager:
         ])
 
     def _delete_remote_customization(self, fork_repo: str, branch: str) -> None:
-        """Delete the customization branch and its variant packages if present."""
+        """Delete the customization branch and only the package versions it built.
+
+        The fork publishes every variant under the same branch-derived tag, so we
+        remove just the versions carrying that tag instead of deleting whole
+        packages (which would wipe every other build the user still relies on).
+        """
         try:
             self._run(["gh", "api", "--method", "DELETE", f"repos/{fork_repo}/git/refs/heads/{branch}"])
         except ImageSourceError as exc:
@@ -204,17 +211,51 @@ class ImageSourceManager:
             if not any(marker in message for marker in ("404", "Not Found", "Reference does not exist")):
                 raise
         owner = fork_repo.split("/", 1)[0]
-        for package in ("full", "ad", "web", "blueteam"):
+        branch_tag = branch.replace("/", "-")
+        for package in VARIANTS:
+            self._delete_package_versions_tagged(owner, package, branch_tag)
+
+    def _delete_package_versions_tagged(self, owner: str, package: str, tag: str) -> None:
+        """Delete the versions of one GHCR container package that carry ``tag``."""
+        try:
+            raw = self._run([
+                "gh", "api", "--paginate",
+                f"users/{owner}/packages/container/{package}/versions",
+            ])
+        except ImageSourceError as exc:
+            if "404" in str(exc) or "Not Found" in str(exc):
+                return  # the package was never published
+            if "delete:packages" in str(exc) or "read:packages" in str(exc):
+                raise ImageSourceError(
+                    f"{exc}\nRefresh GitHub CLI package scopes with:\n"
+                    "  gh auth refresh -h github.com -s read:packages,delete:packages"
+                ) from exc
+            raise
+        try:
+            versions = json.loads(raw or "[]")
+        except json.JSONDecodeError:
+            return
+        for version in versions:
+            tags = (((version.get("metadata") or {}).get("container") or {}).get("tags")) or []
+            if tag not in tags:
+                continue
+            version_id = version.get("id")
+            if version_id is None:
+                continue
             try:
-                self._run(["gh", "api", "--method", "DELETE", f"users/{owner}/packages/container/{package}"])
+                self._run([
+                    "gh", "api", "--method", "DELETE",
+                    f"users/{owner}/packages/container/{package}/versions/{version_id}",
+                ])
             except ImageSourceError as exc:
-                if "404" not in str(exc) and "Not Found" not in str(exc):
-                    if "delete:packages" in str(exc) or "read:packages" in str(exc):
-                        raise ImageSourceError(
-                            f"{exc}\nRefresh GitHub CLI package scopes with:\n"
-                            "  gh auth refresh -h github.com -s read:packages,delete:packages"
-                        ) from exc
-                    raise
+                if "404" in str(exc) or "Not Found" in str(exc):
+                    continue
+                if "delete:packages" in str(exc) or "read:packages" in str(exc):
+                    raise ImageSourceError(
+                        f"{exc}\nRefresh GitHub CLI package scopes with:\n"
+                        "  gh auth refresh -h github.com -s read:packages,delete:packages"
+                    ) from exc
+                raise
 
     def _ensure_git_remote(self, path: Path, name: str, url: str) -> None:
         remotes = self._run(["git", "remote"], cwd=path).splitlines()
@@ -342,8 +383,8 @@ class ImageSourceManager:
         progress_callback=None, cancel_event=None,
     ) -> tuple[str, str]:
         """Trigger the Docker workflow for the active source and return its repo/ref."""
-        if variant not in {"all", "full", "ad", "web", "blueteam"}:
-            raise ImageSourceError("Unknown image variant. Choose all, full, ad, web, or blueteam.")
+        if variant not in {"all", *VARIANTS}:
+            raise ImageSourceError("Unknown image variant. Choose all, full, ad, web, defender, or mobile.")
         if self.config.image_source_active == "upstream":
             repo = self.upstream_repo
             branch = self.config.image_channel

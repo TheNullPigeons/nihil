@@ -44,7 +44,7 @@ _CONFIG_INFO = {
 _CONTAINER_INFO = {
     "privileged": ("Override the default Docker privileged setting for this preset.", "true | false | default"),
     "network": ("Docker network or network mode used when creating the container.", "host | docker | nat | disabled | existing network name | default"),
-    "image": ("Image variant used for the container.", "full | ad | web | blueteam | local image tag | default"),
+    "image": ("Image variant used for the container.", "full | ad | web | defender | mobile | local image tag | default"),
     "workspace": ("Host directory mounted at /workspace.", "path | default"),
     "workspace_here": ("Mount the current directory at /workspace.", "true | false | default"),
     "vpn": ("Start OpenVPN inside the container.", "true | false | .ovpn file path | null (off)"),
@@ -73,7 +73,7 @@ _ENUMS = {
 _CONTAINER_CYCLE_VALUES = {
     "privileged": (None, True, False),
     "network": (None, "host", "docker", "nat", "disabled"),
-    "image": (None, "full", "ad", "web", "blueteam"),
+    "image": (None, "full", "ad", "web", "defender", "mobile"),
     "browser_ui_resolution": ("1280x720", "1920x1080", "2560x1440"),
 }
 _STRING_OR_NULL = {

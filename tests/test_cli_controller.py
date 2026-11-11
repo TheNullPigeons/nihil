@@ -405,7 +405,7 @@ class TestBuildPlatform:
         ("variant", "dockerfile"),
         [
             ("full", "Dockerfile"),
-            ("blueteam", "Dockerfile.blueteam"),
+            ("defender", "Dockerfile.defender"),
             ("test", "Dockerfile.test"),
         ],
     )
@@ -524,3 +524,122 @@ class TestResolveDisplayForwarding:
         x11, wayland, messages = NihilController._resolve_display_forwarding(False, False, True)
         assert (x11, wayland) == (False, False)
         assert messages == []
+
+
+class TestWipeWorkspaceGuard:
+    """The --wipe guard must never delete a catastrophic host path, even with --force."""
+
+    def _controller(self):
+        from nihil.cli.controller import NihilController
+        from nihil.console import NihilFormatter
+        controller = object.__new__(NihilController)
+        controller.formatter = NihilFormatter(use_colors=False)
+        return controller
+
+    def test_protected_paths_detected(self):
+        from pathlib import Path
+        c = self._controller()
+        assert c._is_protected_path(Path("/")) is True
+        assert c._is_protected_path(Path.home()) is True
+        assert c._is_protected_path(Path.home().parent) is True
+
+    def test_wipe_refuses_home_even_with_force(self, monkeypatch):
+        from pathlib import Path
+        c = self._controller()
+        called = []
+        monkeypatch.setattr("shutil.rmtree", lambda *a, **k: called.append(a))
+        c._wipe_workspace("box", str(Path.home()), skip_confirm=True)
+        assert called == []  # guard blocked the deletion
+
+    def test_wipe_deletes_a_safe_dir_with_force(self, tmp_path, monkeypatch):
+        c = self._controller()
+        target = tmp_path / "ws"
+        target.mkdir()
+        (target / "file.txt").write_text("x")
+        # A deep temp dir is not protected: --force wipes it without a prompt.
+        c._wipe_workspace("box", str(target), skip_confirm=True)
+        assert not target.exists()
+
+    def test_wipe_respects_declined_confirmation(self, tmp_path, monkeypatch):
+        import sys
+        c = self._controller()
+        target = tmp_path / "ws"
+        target.mkdir()
+        called = []
+        monkeypatch.setattr("shutil.rmtree", lambda *a, **k: called.append(a))
+        # Without --force the user is asked; a 'no' must keep the directory.
+        fake_confirm = type("C", (), {"ask": staticmethod(lambda *a, **k: False)})
+        monkeypatch.setitem(sys.modules, "rich.prompt", type("M", (), {"Confirm": fake_confirm}))
+        c._wipe_workspace("box", str(target), skip_confirm=False)
+        assert called == []
+        assert target.exists()
+
+
+class TestEditorCommand:
+    """$EDITOR may carry flags (e.g. 'code --wait'); the argv must split them out."""
+
+    def test_editor_with_flags_is_split(self, monkeypatch):
+        from nihil.cli.controller import NihilController
+        monkeypatch.setenv("EDITOR", "code --wait")
+        assert NihilController._editor_command("/tmp/x.yml") == ["code", "--wait", "/tmp/x.yml"]
+
+    def test_plain_editor(self, monkeypatch):
+        from nihil.cli.controller import NihilController
+        monkeypatch.setenv("EDITOR", "nano")
+        assert NihilController._editor_command("/tmp/x.yml") == ["nano", "/tmp/x.yml"]
+
+
+class TestStartPresetExtraction:
+    """The preset resolution split out of _cmd_start must keep the same merge rules."""
+
+    def _controller(self):
+        from nihil.cli.controller import NihilController
+        from nihil.console import NihilFormatter
+        c = object.__new__(NihilController)
+        c.formatter = NihilFormatter(use_colors=False)
+        return c
+
+    def test_apply_preset_options_respects_explicit_args(self):
+        from types import SimpleNamespace
+        from nihil.cli.controller import NihilController
+        args = SimpleNamespace(env=["A=1"], workspace=None, workspace_here=None,
+                               network="host", browser_ui_resolution_explicit=False,
+                               browser_ui_resolution=None)
+        NihilController._apply_preset_options(args, {
+            "env": ["B=2"],            # preset env is prepended, explicit kept
+            "network": "docker",       # explicit 'host' must win
+            "workspace": "/w",         # filled because unset
+            "browser_ui_resolution": "1920x1080",
+            "scripts": "ignored",
+        })
+        assert args.env == ["B=2", "A=1"]
+        assert args.network == "host"
+        assert args.workspace == "/w"
+        assert args.browser_ui_resolution == "1920x1080"
+
+    def test_resolve_preset_passthrough_when_none(self):
+        from types import SimpleNamespace
+        c = self._controller()
+        c.config = SimpleNamespace(name="cfg")
+        args = SimpleNamespace(preset=None)
+        result = c._resolve_start_preset(args, container_existed=False, verbose=False)
+        assert result == (c.config, {}, None)
+
+    def test_resolve_preset_rejects_existing_container(self):
+        from types import SimpleNamespace
+        c = self._controller()
+        c.config = SimpleNamespace()
+        args = SimpleNamespace(preset="x")
+        assert c._resolve_start_preset(args, container_existed=True, verbose=False) == 1
+
+
+def test_every_variant_is_buildable():
+    # The build command must know a Dockerfile for every variant (mobile was missing).
+    from nihil.cli.controller import NihilController
+    from nihil.features.images import VARIANTS
+    mapping = NihilController._VARIANT_DOCKERFILES
+    for variant in VARIANTS:
+        assert variant in mapping, f"{variant} has no Dockerfile mapping"
+    assert mapping["full"] == "Dockerfile"
+    assert mapping["mobile"] == "Dockerfile.mobile"
+    assert mapping["test"] == "Dockerfile.test"
