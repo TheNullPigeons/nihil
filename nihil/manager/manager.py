@@ -307,13 +307,6 @@ class NihilManager:
                 )
         return snapshot_tag
 
-    def container_exists(self, name: str) -> bool:
-        try:
-            self.client.containers.get(name)
-            return True
-        except docker.errors.NotFound:
-            return False
-
     def get_container(self, name: str):
         try:
             return self.client.containers.get(name)

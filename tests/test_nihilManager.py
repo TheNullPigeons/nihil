@@ -643,3 +643,15 @@ class TestEnvAsDict:
         assert f(["TOKEN=a=b=c"]) == {"TOKEN": "a=b=c"}
         # Malformed entries without '=' are dropped, not crashed on.
         assert f(["NOEQUALS", "C=3"]) == {"C": "3"}
+
+
+def test_get_container_returns_none_when_missing():
+    # get_container is the single membership check (dead container_exists was removed).
+    from unittest.mock import Mock
+    import docker
+    from nihil.manager import NihilManager
+    manager = NihilManager.__new__(NihilManager)
+    manager.client = Mock()
+    manager.client.containers.get.side_effect = docker.errors.NotFound("absent")
+    assert manager.get_container("ghost") is None
+    assert not hasattr(manager, "container_exists")
