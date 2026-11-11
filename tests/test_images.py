@@ -222,3 +222,36 @@ def test_unused_image_stops_if_container_appears_during_reference_removal():
     with pytest.raises(RuntimeError, match="now used"):
         manager.remove_unused_image("sha256:old")
     manager.client.images.remove.assert_called_once_with("sha256:old", force=False, noprune=True)
+
+
+class TestVariantConsistency:
+    """A single source of truth (VARIANTS) must stay in sync with everything derived from it."""
+
+    def test_available_images_and_descriptions_cover_every_variant(self):
+        from nihil.features.images import VARIANTS, AVAILABLE_IMAGES, VARIANT_DESCRIPTIONS
+        assert set(AVAILABLE_IMAGES) == set(VARIANTS)
+        assert set(VARIANT_DESCRIPTIONS) == set(VARIANTS)
+
+    def test_parser_choices_include_every_variant(self):
+        from nihil.features.images import VARIANTS
+        from nihil.cli.parser import create_parser
+        parser = create_parser()
+        found = set()
+        for action in parser._subparsers._group_actions[0].choices.values():
+            for sub in action._actions:
+                if sub.choices:
+                    found.update(c for c in sub.choices if c in VARIANTS)
+        assert set(VARIANTS) <= found
+
+    def test_trigger_build_accepts_every_variant(self):
+        from types import SimpleNamespace
+        from nihil.features.images import VARIANTS
+        from nihil.features.image_sources import ImageSourceManager, ImageSourceError
+        config = SimpleNamespace(image_sources_home=__import__("pathlib").Path("/tmp"),
+                                 image_sources_upstream_path=__import__("pathlib").Path("/tmp"),
+                                 image_source_active="nowhere")
+        manager = ImageSourceManager(config)
+        # Unknown source raises AFTER the variant check, so a known variant gets past validation.
+        for variant in (*VARIANTS, "all"):
+            with __import__("pytest").raises(ImageSourceError, match="Unknown source"):
+                manager.trigger_build(variant=variant)

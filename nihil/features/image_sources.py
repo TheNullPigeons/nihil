@@ -14,6 +14,8 @@ from pathlib import Path
 from urllib.parse import quote, urlparse
 
 
+from nihil.features.images import VARIANTS
+
 UPSTREAM_REPO = "TheNullPigeons/nihil-images"
 
 
@@ -210,7 +212,7 @@ class ImageSourceManager:
                 raise
         owner = fork_repo.split("/", 1)[0]
         branch_tag = branch.replace("/", "-")
-        for package in ("full", "ad", "web", "defender", "mobile"):
+        for package in VARIANTS:
             self._delete_package_versions_tagged(owner, package, branch_tag)
 
     def _delete_package_versions_tagged(self, owner: str, package: str, tag: str) -> None:
@@ -381,7 +383,7 @@ class ImageSourceManager:
         progress_callback=None, cancel_event=None,
     ) -> tuple[str, str]:
         """Trigger the Docker workflow for the active source and return its repo/ref."""
-        if variant not in {"all", "full", "ad", "web", "defender", "mobile"}:
+        if variant not in {"all", *VARIANTS}:
             raise ImageSourceError("Unknown image variant. Choose all, full, ad, web, defender, or mobile.")
         if self.config.image_source_active == "upstream":
             repo = self.upstream_repo

@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """Parser CLI Nihil: sous-commandes et arguments."""
 
+from nihil.features.images import VARIANTS
 import argparse
 
 from nihil import __version__
@@ -140,7 +141,7 @@ Examples:
         "customize", help="Select tools for a personal nihil-images branch"
     )
     customize_parser.add_argument(
-        "variant", choices=["full", "ad", "web", "defender", "mobile"], default="full", nargs="?",
+        "variant", choices=[*VARIANTS], default="full", nargs="?",
         help="Image variant whose source branch should be customized (default: full)",
     )
     customize_parser.add_argument(
@@ -176,7 +177,7 @@ Examples:
     channel_parser.add_argument("channel", choices=["main", "dev"], nargs="?", help="Channel to use (omit to show current channel)")
     image_subparsers.add_parser("status", help="Show configured upstream and personal image sources")
     image_build = image_subparsers.add_parser("build", help="Trigger a GitHub Actions image build")
-    image_build.add_argument("variant", choices=["all", "full", "ad", "web", "defender", "mobile"], nargs="?", default="all", help="Image variant to build (default: all)")
+    image_build.add_argument("variant", choices=["all", *VARIANTS], nargs="?", default="all", help="Image variant to build (default: all)")
     image_build.add_argument("--wait", action="store_true", help="Wait until the GitHub Actions build finishes")
     image_build.add_argument("--web", action="store_true", help="Configure and follow the GitHub Actions build in a local browser page")
     image_build.add_argument("--allow-tool-failures", action="store_true", help="Continue after non-core tool failures and keep a report in the image")
@@ -223,7 +224,7 @@ Examples:
     uninstall_parser.add_argument("--force", "-f", action="store_true", help="Force removal (with --unused: skip confirmation only)")
 
     update_parser = subparsers.add_parser("update", help="Update installed nihil images")
-    update_parser.add_argument("image", choices=["full", "ad", "web", "defender", "mobile"], nargs="?", default=None, help="Image variant to update. If not specified, all installed images are updated.")
+    update_parser.add_argument("image", choices=[*VARIANTS], nargs="?", default=None, help="Image variant to update. If not specified, all installed images are updated.")
 
     upgrade_parser = subparsers.add_parser("upgrade", help="Recreate one or more containers from the current local image (use --pull to also fetch the latest from the registry)")
     upgrade_parser.add_argument("names", nargs="*", help="Container name(s) to upgrade. If not specified, prompted to select.")
@@ -231,7 +232,7 @@ Examples:
     upgrade_parser.add_argument("--pull", "-p", action="store_true", help="Pull the latest image from the registry before recreating (default: use the existing local image)")
     upgrade_parser.add_argument("--all", action="store_true", help="Upgrade all Nihil containers without prompting.")
     upgrade_parser.add_argument("--start", action="store_true", help="Open a shell in the container after upgrading. Only valid when upgrading one container.")
-    upgrade_parser.add_argument("--image", "-i", choices=["full", "ad", "web", "defender", "mobile"], default=None, help="Change the container's image variant to the specified one during the upgrade.")
+    upgrade_parser.add_argument("--image", "-i", choices=[*VARIANTS], default=None, help="Change the container's image variant to the specified one during the upgrade.")
     upgrade_privilege = upgrade_parser.add_mutually_exclusive_group()
     upgrade_privilege.add_argument("--privileged", action="store_true", help="Recreate the container in privileged mode.")
     upgrade_privilege.add_argument("--standard", action="store_true", help="Recreate the container without privileged mode.")
@@ -246,7 +247,7 @@ Examples:
     exec_parser.add_argument("exec_command", nargs="*", help="Command to execute (default: zsh)")
 
     tools_parser = subparsers.add_parser("tools", help="List tools available in a nihil image")
-    tools_parser.add_argument("image", choices=["full", "ad", "active-directory", "web", "defender", "mobile"], nargs="?", default=None, help="Image variant (default: full)")
+    tools_parser.add_argument("image", choices=["active-directory", *VARIANTS], nargs="?", default=None, help="Image variant (default: full)")
     tools_parser.add_argument("--category", "-c", default=None, help="Filter by category (e.g. redteam_ad, redteam_web)")
 
     config_parser = subparsers.add_parser("config", help="Show or edit the Nihil configuration file")
@@ -271,7 +272,7 @@ Examples:
         description=("Build locally with Docker. By default, use build.images_path or the current "
                      "nihil-images checkout; otherwise clone the active remote source and branch."),
     )
-    build_parser.add_argument("variant", choices=["full", "ad", "defender", "mobile", "web", "test"], nargs="?", default="full", help="Image variant to build (default: full)")
+    build_parser.add_argument("variant", choices=[*VARIANTS, "test"], nargs="?", default="full", help="Image variant to build (default: full)")
     build_parser.add_argument("--source", "-s", metavar="PATH|REPO", default=None, help="Local source directory or remote Git repository (overrides configured source)")
     build_parser.add_argument("--ref", metavar="REF", default=None, help="Remote branch or tag (default: active source branch/channel)")
     build_parser.add_argument("--no-cache", action="store_true", help="Pass --no-cache to docker build")

@@ -2,6 +2,20 @@
 # -*- coding: utf-8 -*-
 """Registre d’images Nihil (variantes, noms courts pour l’affichage)."""
 
+# Single source of truth for the image variants. Everything that needs the
+# variant list (argparse choices, registry builders, source validation,
+# descriptions) must derive it from here instead of re-typing the tuple.
+VARIANTS = ("full", "ad", "web", "defender", "mobile")
+
+# One-line description per variant, shown in the image listings.
+VARIANT_DESCRIPTIONS = {
+    "full": "The whole flock, every tool, every module",
+    "ad": "Nest in their Active Directory",
+    "web": "Beak through their web apps",
+    "defender": "Blue Team, DFIR and threat hunting",
+    "mobile": "Carry it into their pocket. Android and iOS",
+}
+
 # Image par défaut
 DEFAULT_IMAGE = "ghcr.io/thenullpigeons/full:latest"
 

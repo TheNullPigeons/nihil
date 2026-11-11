@@ -16,6 +16,7 @@ from typing import Dict, List, Optional, Tuple
 
 from docker.errors import APIError
 from nihil.config import ensure_filesystem, NihilConfig, NIHIL_HOME
+from nihil.features.images import VARIANTS, VARIANT_DESCRIPTIONS
 from nihil.features.browser_ui import (
     save_password as browser_ui_save_password,
     load_password as browser_ui_load_password,
@@ -278,7 +279,7 @@ class NihilController:
             tag = "dev" if self.config.image_channel == "dev" else "latest"
             self.manager.AVAILABLE_IMAGES = {
                 variant: f"ghcr.io/thenullpigeons/{variant}:{tag}"
-                for variant in ("full", "ad", "web", "defender", "mobile")
+                for variant in VARIANTS
             }
             self.manager.DEFAULT_IMAGE = self.manager.AVAILABLE_IMAGES["full"]
             return
@@ -287,7 +288,7 @@ class NihilController:
         image_tag = branch.replace("/", "-") if branch else "latest"
         self.manager.AVAILABLE_IMAGES = {
             variant: f"ghcr.io/{owner}/{variant}:{image_tag}"
-            for variant in ("full", "ad", "web", "defender", "mobile")
+            for variant in VARIANTS
         }
         self.manager.DEFAULT_IMAGE = self.manager.AVAILABLE_IMAGES["full"]
 
@@ -1785,13 +1786,7 @@ class NihilController:
     def _cmd_images(self) -> int:
         print(self.formatter.section_header("AVAILABLE IMAGE VARIANTS"))
         rows = []
-        variant_descriptions = {
-            "full": "The whole flock, every tool, every module",
-            "ad": "Nest in their Active Directory",
-            "web": "Beak through their web apps",
-            "defender": "Blue Team, DFIR and threat hunting",
-            "mobile": "Carry it into their pocket. Android and iOS",
-        }
+        variant_descriptions = VARIANT_DESCRIPTIONS
         local_v = self.manager.list_local_variants()
         all_v = {**self.manager.AVAILABLE_IMAGES, **{k: v for k, v in local_v.items() if k not in self.manager.AVAILABLE_IMAGES}}
         registry_statuses = self._image_registry_statuses(
@@ -1824,13 +1819,7 @@ class NihilController:
             return 0
         print(self.formatter.info(f"Nihil version {__version__}\n"))
         print(self.formatter.info(f"Active image source: {self.formatter.image_source(self.config.image_source_active)}"))
-        variant_descriptions = {
-            "full": "The whole flock, every tool, every module",
-            "ad": "Nest in their Active Directory",
-            "web": "Beak through their web apps",
-            "defender": "Blue Team, DFIR and threat hunting",
-            "mobile": "Carry it into their pocket. Android and iOS",
-        }
+        variant_descriptions = VARIANT_DESCRIPTIONS
         print(self.formatter.section_header("AVAILABLE IMAGE VARIANTS"))
         rows = []
         all_variants = self.manager.AVAILABLE_IMAGES
