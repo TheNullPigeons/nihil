@@ -405,7 +405,7 @@ class TestBuildPlatform:
         ("variant", "dockerfile"),
         [
             ("full", "Dockerfile"),
-            ("blueteam", "Dockerfile.blueteam"),
+            ("defender", "Dockerfile.defender"),
             ("test", "Dockerfile.test"),
         ],
     )

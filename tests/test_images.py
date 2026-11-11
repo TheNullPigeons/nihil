@@ -21,7 +21,7 @@ class TestImagesRegistry:
         assert "full" in AVAILABLE_IMAGES
         assert "ad" in AVAILABLE_IMAGES
         assert "web" in AVAILABLE_IMAGES
-        assert "blueteam" in AVAILABLE_IMAGES
+        assert "defender" in AVAILABLE_IMAGES
 
     def test_full_and_default_match(self):
         assert AVAILABLE_IMAGES["full"] == DEFAULT_IMAGE
@@ -48,11 +48,11 @@ class TestShortImageName:
     def test_known_web_beak_returns_web(self):
         assert short_image_name("ghcr.io/thenullpigeons/web:beak") == "web"
 
-    def test_known_blueteam_returns_blueteam(self):
-        assert short_image_name("ghcr.io/thenullpigeons/blueteam:latest") == "blueteam:main"
+    def test_known_defender_returns_defender(self):
+        assert short_image_name("ghcr.io/thenullpigeons/defender:latest") == "defender:main"
 
-    def test_known_blueteam_coo_returns_blueteam(self):
-        assert short_image_name("ghcr.io/thenullpigeons/blueteam:coo") == "blueteam"
+    def test_known_defender_coo_returns_defender(self):
+        assert short_image_name("ghcr.io/thenullpigeons/defender:coo") == "defender"
 
     def test_unknown_with_slash_uses_last_part(self):
         assert short_image_name("registry/foo/bar:v1") == "bar:v1"

@@ -204,7 +204,7 @@ class ImageSourceManager:
             if not any(marker in message for marker in ("404", "Not Found", "Reference does not exist")):
                 raise
         owner = fork_repo.split("/", 1)[0]
-        for package in ("full", "ad", "web", "blueteam"):
+        for package in ("full", "ad", "web", "defender", "mobile"):
             try:
                 self._run(["gh", "api", "--method", "DELETE", f"users/{owner}/packages/container/{package}"])
             except ImageSourceError as exc:
@@ -342,8 +342,8 @@ class ImageSourceManager:
         progress_callback=None, cancel_event=None,
     ) -> tuple[str, str]:
         """Trigger the Docker workflow for the active source and return its repo/ref."""
-        if variant not in {"all", "full", "ad", "web", "blueteam"}:
-            raise ImageSourceError("Unknown image variant. Choose all, full, ad, web, or blueteam.")
+        if variant not in {"all", "full", "ad", "web", "defender", "mobile"}:
+            raise ImageSourceError("Unknown image variant. Choose all, full, ad, web, defender, or mobile.")
         if self.config.image_source_active == "upstream":
             repo = self.upstream_repo
             branch = self.config.image_channel

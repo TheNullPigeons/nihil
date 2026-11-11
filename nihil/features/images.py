@@ -10,7 +10,8 @@ AVAILABLE_IMAGES = {
     "full": "ghcr.io/thenullpigeons/full:latest",
     "ad": "ghcr.io/thenullpigeons/ad:latest",
     "web": "ghcr.io/thenullpigeons/web:latest",
-    "blueteam": "ghcr.io/thenullpigeons/blueteam:latest",
+    "defender": "ghcr.io/thenullpigeons/defender:latest",
+    "mobile": "ghcr.io/thenullpigeons/mobile:latest",
 }
 
 # Tag complet -> nom d’affichage compact
@@ -21,8 +22,10 @@ SHORT_NAMES = {
     "ghcr.io/thenullpigeons/ad:nest": "ad",
     "ghcr.io/thenullpigeons/web:latest": "web:main",
     "ghcr.io/thenullpigeons/web:beak": "web",
-    "ghcr.io/thenullpigeons/blueteam:latest": "blueteam:main",
-    "ghcr.io/thenullpigeons/blueteam:coo": "blueteam",
+    "ghcr.io/thenullpigeons/defender:latest": "defender:main",
+    "ghcr.io/thenullpigeons/defender:coo": "defender",
+    "ghcr.io/thenullpigeons/mobile:latest": "mobile:main",
+    "ghcr.io/thenullpigeons/mobile:carrier": "mobile",
 }
 
 

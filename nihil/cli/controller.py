@@ -278,7 +278,7 @@ class NihilController:
             tag = "dev" if self.config.image_channel == "dev" else "latest"
             self.manager.AVAILABLE_IMAGES = {
                 variant: f"ghcr.io/thenullpigeons/{variant}:{tag}"
-                for variant in ("full", "ad", "web", "blueteam")
+                for variant in ("full", "ad", "web", "defender", "mobile")
             }
             self.manager.DEFAULT_IMAGE = self.manager.AVAILABLE_IMAGES["full"]
             return
@@ -287,7 +287,7 @@ class NihilController:
         image_tag = branch.replace("/", "-") if branch else "latest"
         self.manager.AVAILABLE_IMAGES = {
             variant: f"ghcr.io/{owner}/{variant}:{image_tag}"
-            for variant in ("full", "ad", "web", "blueteam")
+            for variant in ("full", "ad", "web", "defender", "mobile")
         }
         self.manager.DEFAULT_IMAGE = self.manager.AVAILABLE_IMAGES["full"]
 
@@ -525,8 +525,10 @@ class NihilController:
                         desc = "Active Directory tools"
                     elif "web" in variant:
                         desc = "Web Hacking tools"
-                    elif "blueteam" in variant:
+                    elif "defender" in variant:
                         desc = "Blue Team / DFIR tools"
+                    elif "mobile" in variant:
+                        desc = "Mobile (Android / iOS) tools"
                     else:
                         desc = "The whole flock"
                     image_tag = all_variants[variant]
@@ -1764,7 +1766,7 @@ class NihilController:
             "full": "The whole flock, every tool, every module",
             "ad": "Nest in their Active Directory",
             "web": "Beak through their web apps",
-            "blueteam": "Blue Team, DFIR and threat hunting",
+            "defender": "Blue Team, DFIR and threat hunting",
         }
         local_v = self.manager.list_local_variants()
         all_v = {**self.manager.AVAILABLE_IMAGES, **{k: v for k, v in local_v.items() if k not in self.manager.AVAILABLE_IMAGES}}
@@ -1802,7 +1804,7 @@ class NihilController:
             "full": "The whole flock, every tool, every module",
             "ad": "Nest in their Active Directory",
             "web": "Beak through their web apps",
-            "blueteam": "Blue Team, DFIR and threat hunting",
+            "defender": "Blue Team, DFIR and threat hunting",
         }
         print(self.formatter.section_header("AVAILABLE IMAGE VARIANTS"))
         rows = []
@@ -2038,7 +2040,7 @@ class NihilController:
         DOCKERFILES = {
             "full":     "Dockerfile",
             "ad":       "Dockerfile.ad",
-            "blueteam": "Dockerfile.blueteam",
+            "defender": "Dockerfile.defender",
             "web":      "Dockerfile.web",
             "test":     "Dockerfile.test",
         }

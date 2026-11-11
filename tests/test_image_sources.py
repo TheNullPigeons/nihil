@@ -206,7 +206,7 @@ def test_distant_cleanup_deletes_branch_and_all_variant_packages(tmp_path):
         "gh", "api", "--method", "DELETE",
         "repos/alice/nihil-images/git/refs/heads/nihil/web-custom",
     ] in calls
-    for package in ("full", "ad", "web", "blueteam"):
+    for package in ("full", "ad", "web", "defender", "mobile"):
         assert [
             "gh", "api", "--method", "DELETE",
             f"users/alice/packages/container/{package}",
@@ -244,7 +244,7 @@ def test_distant_cleanup_ignores_missing_branch(tmp_path):
 
     manager._run = fake_run
     manager._delete_remote_customization("alice/nihil-images", "nihil/web-custom")
-    assert sum("packages/container" in command[-1] for command in calls) == 4
+    assert sum("packages/container" in command[-1] for command in calls) == 5
 
 
 @pytest.mark.parametrize("source,channel,repo,branch", [
