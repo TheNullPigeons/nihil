@@ -33,6 +33,13 @@ from nihil import __version__
 
 
 class NihilController:
+    # Dockerfile per build variant (full uses the root Dockerfile), derived from
+    # VARIANTS so every variant stays buildable. 'test' is build-only.
+    _VARIANT_DOCKERFILES = {
+        **{v: ("Dockerfile" if v == "full" else f"Dockerfile.{v}") for v in VARIANTS},
+        "test": "Dockerfile.test",
+    }
+
     def __init__(self):
         ensure_filesystem()
         self.config = NihilConfig()
@@ -344,6 +351,55 @@ class NihilController:
                 enable_wayland = False
         return enable_x11, enable_wayland, messages
 
+    def _resolve_start_preset(self, args, container_existed: bool, verbose: bool):
+        """Resolve a --preset into (config, options, scripts) and merge it into args.
+
+        Returns an int exit code on error, or the (config, options, scripts) tuple.
+        """
+        config = self.config
+        preset_options: dict = {}
+        preset_scripts = None
+        if getattr(args, "preset", None) is None:
+            return config, preset_options, preset_scripts
+        if container_existed:
+            print(self.formatter.error("--preset can only be used when creating a new container."), file=sys.stderr)
+            return 1
+        if not args.preset and not sys.stdin.isatty():
+            print(self.formatter.error("Pass a preset name when selecting without a terminal."), file=sys.stderr)
+            return 1
+        from nihil.features.config_presets import choose_preset, load_preset, load_preset_options, load_preset_scripts
+        preset_name = args.preset or choose_preset()
+        if not preset_name:
+            print(self.formatter.error("No config preset selected."), file=sys.stderr)
+            return 1
+        try:
+            config = load_preset(preset_name)
+            preset_options = load_preset_options(preset_name)
+            preset_scripts = load_preset_scripts(preset_name, preset_options)
+        except (FileNotFoundError, ValueError) as e:
+            print(self.formatter.error(str(e)), file=sys.stderr)
+            return 1
+        self._apply_preset_options(args, preset_options)
+        if verbose:
+            print(self.formatter.info(f"Using config preset '{preset_name}'."))
+        return config, preset_options, preset_scripts
+
+    @staticmethod
+    def _apply_preset_options(args, preset_options: dict) -> None:
+        """Fill CLI args from a preset's saved container options, without overriding explicit flags."""
+        for field, value in preset_options.items():
+            if field == "scripts":
+                continue
+            if field == "env":
+                args.env = [*(value or []), *(args.env or [])]
+            elif field == "browser_ui_resolution" and args.browser_ui_resolution_explicit:
+                continue
+            elif field in {"workspace", "workspace_here"}:
+                if args.workspace is None and args.workspace_here is None:
+                    setattr(args, field, value)
+            elif getattr(args, field, None) is None:
+                setattr(args, field, value)
+
     def _cmd_start(self, args) -> int:
         _NOT_CHECKED = object()
         _update_cache = [_NOT_CHECKED]
@@ -363,41 +419,10 @@ class NihilController:
         verbose_info(f"Looking for container '{container_name}'...")
         container = self.manager.get_container(container_name)
         container_existed = container is not None
-        config = self.config
-        preset_options = {}
-        preset_scripts = None
-        if getattr(args, "preset", None) is not None:
-            if container_existed:
-                print(self.formatter.error("--preset can only be used when creating a new container."), file=sys.stderr)
-                return 1
-            if not args.preset and not sys.stdin.isatty():
-                print(self.formatter.error("Pass a preset name when selecting without a terminal."), file=sys.stderr)
-                return 1
-            from nihil.features.config_presets import choose_preset, load_preset, load_preset_options, load_preset_scripts
-            preset_name = args.preset or choose_preset()
-            if not preset_name:
-                print(self.formatter.error("No config preset selected."), file=sys.stderr)
-                return 1
-            try:
-                config = load_preset(preset_name)
-                preset_options = load_preset_options(preset_name)
-                preset_scripts = load_preset_scripts(preset_name, preset_options)
-            except (FileNotFoundError, ValueError) as e:
-                print(self.formatter.error(str(e)), file=sys.stderr)
-                return 1
-            for field, value in preset_options.items():
-                if field == "scripts":
-                    continue
-                if field == "env":
-                    args.env = [*(value or []), *(args.env or [])]
-                elif field == "browser_ui_resolution" and args.browser_ui_resolution_explicit:
-                    continue
-                elif field in {"workspace", "workspace_here"}:
-                    if args.workspace is None and args.workspace_here is None:
-                        setattr(args, field, value)
-                elif getattr(args, field, None) is None:
-                    setattr(args, field, value)
-            verbose_info(f"Using config preset '{preset_name}'.")
+        preset_result = self._resolve_start_preset(args, container_existed, verbose)
+        if isinstance(preset_result, int):
+            return preset_result
+        config, preset_options, preset_scripts = preset_result
         startup_scripts = None
         if getattr(args, "script", False):
             if not sys.stdin.isatty():
@@ -2054,13 +2079,7 @@ class NihilController:
             label = self.formatter._colorize(f"{label}:", color)
             return f"{build_timestamp()} {marker} {label} {detail}"
 
-        DOCKERFILES = {
-            "full":     "Dockerfile",
-            "ad":       "Dockerfile.ad",
-            "defender": "Dockerfile.defender",
-            "web":      "Dockerfile.web",
-            "test":     "Dockerfile.test",
-        }
+        DOCKERFILES = self._VARIANT_DOCKERFILES
 
         variant = args.variant or "full"
 

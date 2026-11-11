@@ -587,3 +587,59 @@ class TestEditorCommand:
         from nihil.cli.controller import NihilController
         monkeypatch.setenv("EDITOR", "nano")
         assert NihilController._editor_command("/tmp/x.yml") == ["nano", "/tmp/x.yml"]
+
+
+class TestStartPresetExtraction:
+    """The preset resolution split out of _cmd_start must keep the same merge rules."""
+
+    def _controller(self):
+        from nihil.cli.controller import NihilController
+        from nihil.console import NihilFormatter
+        c = object.__new__(NihilController)
+        c.formatter = NihilFormatter(use_colors=False)
+        return c
+
+    def test_apply_preset_options_respects_explicit_args(self):
+        from types import SimpleNamespace
+        from nihil.cli.controller import NihilController
+        args = SimpleNamespace(env=["A=1"], workspace=None, workspace_here=None,
+                               network="host", browser_ui_resolution_explicit=False,
+                               browser_ui_resolution=None)
+        NihilController._apply_preset_options(args, {
+            "env": ["B=2"],            # preset env is prepended, explicit kept
+            "network": "docker",       # explicit 'host' must win
+            "workspace": "/w",         # filled because unset
+            "browser_ui_resolution": "1920x1080",
+            "scripts": "ignored",
+        })
+        assert args.env == ["B=2", "A=1"]
+        assert args.network == "host"
+        assert args.workspace == "/w"
+        assert args.browser_ui_resolution == "1920x1080"
+
+    def test_resolve_preset_passthrough_when_none(self):
+        from types import SimpleNamespace
+        c = self._controller()
+        c.config = SimpleNamespace(name="cfg")
+        args = SimpleNamespace(preset=None)
+        result = c._resolve_start_preset(args, container_existed=False, verbose=False)
+        assert result == (c.config, {}, None)
+
+    def test_resolve_preset_rejects_existing_container(self):
+        from types import SimpleNamespace
+        c = self._controller()
+        c.config = SimpleNamespace()
+        args = SimpleNamespace(preset="x")
+        assert c._resolve_start_preset(args, container_existed=True, verbose=False) == 1
+
+
+def test_every_variant_is_buildable():
+    # The build command must know a Dockerfile for every variant (mobile was missing).
+    from nihil.cli.controller import NihilController
+    from nihil.features.images import VARIANTS
+    mapping = NihilController._VARIANT_DOCKERFILES
+    for variant in VARIANTS:
+        assert variant in mapping, f"{variant} has no Dockerfile mapping"
+    assert mapping["full"] == "Dockerfile"
+    assert mapping["mobile"] == "Dockerfile.mobile"
+    assert mapping["test"] == "Dockerfile.test"
