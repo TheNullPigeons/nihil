@@ -627,3 +627,19 @@ class TestNihilManager:
                 manager = NihilManager()
                 assert manager.snapshot_local_image_as_version("ghcr.io/thenullpigeons/full:latest") == "nihil/full:1.0.0-abc123def456"
                 mock_image.tag.assert_not_called()
+
+
+class TestEnvAsDict:
+    """The shared env normalizer replaces seven inline copies; it must handle every input shape."""
+
+    def test_env_as_dict_shapes(self):
+        from nihil.manager import NihilManager
+        f = NihilManager._env_as_dict
+        assert f(None) == {}
+        assert f({}) == {}
+        assert f({"A": "1"}) == {"A": "1"}
+        assert f(["A=1", "B=2"]) == {"A": "1", "B": "2"}
+        # A value that itself contains '=' is kept whole (split once).
+        assert f(["TOKEN=a=b=c"]) == {"TOKEN": "a=b=c"}
+        # Malformed entries without '=' are dropped, not crashed on.
+        assert f(["NOEQUALS", "C=3"]) == {"C": "3"}

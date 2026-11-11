@@ -44,6 +44,14 @@ class NihilManager:
     def short_image_name(cls, full_tag: str) -> str:
         return _short_image_name(full_tag)
 
+
+    @staticmethod
+    def _env_as_dict(value) -> Dict[str, str]:
+        """Normalize an environment value (dict, list of 'K=V' strings, or None) to a dict."""
+        if isinstance(value, list):
+            return dict(kv.split("=", 1) for kv in value if "=" in kv)
+        return dict(value or {})
+
     def __init__(self):
         ensure_filesystem()
         try:
@@ -385,20 +393,12 @@ class NihilManager:
             if "volumes" not in container_config:
                 container_config["volumes"] = {}
             container_config["volumes"][str(vpn_file)] = {"bind": "/opt/nihil/vpn/client.ovpn", "mode": "ro"}
-            container_config["environment"] = container_config.get("environment") or {}
-            if isinstance(container_config["environment"], list):
-                container_config["environment"] = dict(
-                    kv.split("=", 1) for kv in container_config["environment"] if "=" in kv
-                )
+            container_config["environment"] = self._env_as_dict(container_config.get("environment"))
             container_config["environment"]["NIHIL_VPN"] = "managed"
         if enable_x11:
             from nihil.utils.platform_info import get_host_os, HostOS
             _host_os = get_host_os()
-            container_config["environment"] = container_config.get("environment") or {}
-            if isinstance(container_config["environment"], list):
-                container_config["environment"] = dict(
-                    kv.split("=", 1) for kv in container_config["environment"] if "=" in kv
-                )
+            container_config["environment"] = self._env_as_dict(container_config.get("environment"))
             if _host_os == HostOS.MACOS:
                 container_config["environment"]["DISPLAY"] = "host.docker.internal:0"
                 container_config["environment"]["NIHIL_X_MODE"] = "xquartz"
@@ -442,11 +442,7 @@ class NihilManager:
             xdg_runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
             if wayland_display and xdg_runtime_dir and (Path(xdg_runtime_dir) / wayland_display).exists():
                 container_runtime_dir = f"/run/user/{os.getuid()}"
-                container_config["environment"] = container_config.get("environment") or {}
-                if isinstance(container_config["environment"], list):
-                    container_config["environment"] = dict(
-                        kv.split("=", 1) for kv in container_config["environment"] if "=" in kv
-                    )
+                container_config["environment"] = self._env_as_dict(container_config.get("environment"))
                 container_config["environment"]["XDG_RUNTIME_DIR"] = container_runtime_dir
                 container_config["environment"]["WAYLAND_DISPLAY"] = wayland_display
                 container_config["environment"]["NIHIL_WAYLAND"] = "1"
@@ -479,11 +475,7 @@ class NihilManager:
                         break
                 else:
                     browser_ui_port = 6901
-            container_config["environment"] = container_config.get("environment") or {}
-            if isinstance(container_config["environment"], list):
-                container_config["environment"] = dict(
-                    kv.split("=", 1) for kv in container_config["environment"] if "=" in kv
-                )
+            container_config["environment"] = self._env_as_dict(container_config.get("environment"))
             container_config["environment"]["NIHIL_BROWSER_UI"] = "1"
             container_config["environment"]["NIHIL_BROWSER_UI_RESOLUTION"] = browser_ui_resolution or "1280x720"
             container_config["environment"]["NIHIL_BROWSER_UI_PORT"] = str(browser_ui_port)
@@ -508,11 +500,7 @@ class NihilManager:
                 container_config["ports"] = container_config.get("ports") or {}
                 container_config["ports"][port_key] = host_binding
         if environment:
-            container_config["environment"] = container_config.get("environment") or {}
-            if isinstance(container_config["environment"], list):
-                container_config["environment"] = dict(
-                    kv.split("=", 1) for kv in container_config["environment"] if "=" in kv
-                )
+            container_config["environment"] = self._env_as_dict(container_config.get("environment"))
             # Fusionné en dernier : les variables passées par l'utilisateur (--env)
             # ont la priorité sur celles fixées automatiquement par nihil ci-dessus.
             container_config["environment"].update(environment)
@@ -1068,10 +1056,7 @@ class NihilManager:
         receive it.  The remaining volumes and user-provided environment stay intact.
         """
         volumes = snapshot.setdefault("volumes", {})
-        environment = snapshot.setdefault("environment", {})
-        if isinstance(environment, list):
-            environment = dict(kv.split("=", 1) for kv in environment if "=" in kv)
-            snapshot["environment"] = environment
+        environment = snapshot["environment"] = self._env_as_dict(snapshot.setdefault("environment", {}))
 
         before_volumes = dict(volumes)
         before_environment = dict(environment)
@@ -1158,9 +1143,7 @@ class NihilManager:
         }
         if snapshot["volumes"]:
             container_config["volumes"] = snapshot["volumes"]
-        environment = snapshot.get("environment") or {}
-        if isinstance(environment, list):
-            environment = dict(kv.split("=", 1) for kv in environment if "=" in kv)
+        environment = self._env_as_dict(snapshot.get("environment"))
         if environment.get("NIHIL_VPN") in ("1", "managed") and snapshot.get("network_mode") == "host":
             snapshot["network_mode"] = "bridge"
         if snapshot["network_mode"]:
