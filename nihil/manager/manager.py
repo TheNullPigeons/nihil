@@ -1232,3 +1232,7 @@ class NihilManager:
                 )
             elif e.response.status_code == 404:
                 raise ImageRemoveFailed(image=image, message=f"Image '{image}' not found.")
+            else:
+                # Any other Docker error (daemon busy, permission, disk) must
+                # surface instead of silently returning None.
+                raise ImageRemoveFailed(image=image, message=f"Could not remove image '{image}': {e}")

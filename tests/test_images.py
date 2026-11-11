@@ -224,6 +224,24 @@ def test_unused_image_stops_if_container_appears_during_reference_removal():
     manager.client.images.remove.assert_called_once_with("sha256:old", force=False, noprune=True)
 
 
+def test_remove_image_raises_on_unexpected_docker_error():
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    import docker
+    import pytest
+    from nihil.manager import NihilManager
+    from nihil.exceptions import ImageRemoveFailed
+
+    manager = NihilManager.__new__(NihilManager)
+    manager.client = Mock()
+    manager.client.images.get.return_value = SimpleNamespace(id="sha256:deadbeef")
+    response = SimpleNamespace(status_code=500, url="http+docker://localhost/images", reason="Server Error")
+    # A 500 (not 409/404) must surface as an error instead of returning None.
+    manager.client.images.remove.side_effect = docker.errors.APIError("server error", response=response)
+    with pytest.raises(ImageRemoveFailed):
+        manager.remove_image("nihil/full:local")
+
+
 class TestVariantConsistency:
     """A single source of truth (VARIANTS) must stay in sync with everything derived from it."""
 
