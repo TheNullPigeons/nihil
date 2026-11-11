@@ -559,3 +559,17 @@ class TestWipeWorkspaceGuard:
         # A deep temp dir is not protected: --force wipes it without a prompt.
         c._wipe_workspace("box", str(target), skip_confirm=True)
         assert not target.exists()
+
+    def test_wipe_respects_declined_confirmation(self, tmp_path, monkeypatch):
+        import sys
+        c = self._controller()
+        target = tmp_path / "ws"
+        target.mkdir()
+        called = []
+        monkeypatch.setattr("shutil.rmtree", lambda *a, **k: called.append(a))
+        # Without --force the user is asked; a 'no' must keep the directory.
+        fake_confirm = type("C", (), {"ask": staticmethod(lambda *a, **k: False)})
+        monkeypatch.setitem(sys.modules, "rich.prompt", type("M", (), {"Confirm": fake_confirm}))
+        c._wipe_workspace("box", str(target), skip_confirm=False)
+        assert called == []
+        assert target.exists()

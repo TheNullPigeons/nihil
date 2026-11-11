@@ -755,3 +755,28 @@ def test_delete_remote_customization_removes_only_tagged_versions(tmp_path):
     # ...and no whole package is ever deleted.
     assert not any(d.rstrip("/").endswith("/packages/container/full") for d in deletes)
     assert not any("/versions/" not in d and "/packages/container/" in d for d in deletes)
+
+
+def test_delete_remote_customization_keeps_unmatched_packages(tmp_path):
+    import json as _json
+    from types import SimpleNamespace
+    from nihil.features.image_sources import ImageSourceManager
+
+    config = SimpleNamespace(
+        image_sources_home=tmp_path,
+        image_sources_upstream_path=tmp_path / "upstream" / "nihil-images",
+    )
+    manager = ImageSourceManager(config)
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        if command[-1].endswith("/versions"):
+            # No version carries the branch tag.
+            return _json.dumps([{"id": 7, "metadata": {"container": {"tags": ["latest"]}}}])
+        return ""
+
+    manager._run = fake_run
+    manager._delete_remote_customization("alice/nihil-images", "nihil/web-custom")
+    deletes = [c for c in calls if "--method" in c and "DELETE" in c and "/versions/" in c[-1]]
+    assert deletes == []  # nothing matched, nothing deleted
